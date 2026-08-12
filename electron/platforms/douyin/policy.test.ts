@@ -7,7 +7,7 @@ import {
   FAVORITES_PAGE_SIZE,
   isSafeQrCodeDataUrl,
   registerDouyinNavigationGuards,
-} from './douyin-policy.ts'
+} from './policy.ts'
 
 type NavigationEvent = {
   preventDefault: () => void

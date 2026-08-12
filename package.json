@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint --ignore-pattern dist --ignore-pattern dist-electron",
-    "test": "node --experimental-strip-types --test electron/douyin-policy.test.ts electron/removal-policy.test.ts tests/clear-scope.test.ts",
+    "test": "node --experimental-strip-types --test electron/platforms/douyin/policy.test.ts electron/shared/removal-policy.test.ts tests/shared/clear-scope.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {

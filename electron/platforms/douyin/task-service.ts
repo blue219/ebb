@@ -1,66 +1,24 @@
 import { BrowserWindow, session, WebContentsView, type Session } from 'electron'
 
+import type {
+  AccountSnapshot,
+  DouyinVideo,
+  LoginSnapshot,
+  TaskCounts,
+  TaskMode,
+  TaskSnapshot,
+  TaskState,
+} from '../../../shared/platforms/douyin/contracts.js'
 import {
   FAVORITES_PAGE_SIZE,
   isDouyinUrl,
   isSafeQrCodeDataUrl,
   registerDouyinNavigationGuards,
-} from './douyin-policy.js'
+} from './policy.js'
 import {
   createAutomaticRemovalPlan,
   hasReachedAutomaticTarget,
-} from './removal-policy.js'
-
-export type TaskState = 'idle' | 'scanning' | 'ready' | 'running' | 'paused' | 'completed' | 'stopped'
-export type TaskMode = 'selected' | 'limited' | 'all'
-export type VideoStatus = 'pending' | 'processing' | 'completed' | 'failed'
-
-export interface DouyinVideo {
-  id: string
-  title: string
-  thumbnail?: string
-  status: VideoStatus
-}
-
-export interface TaskCounts {
-  loaded: number
-  selected: number
-  completed: number
-  failed: number
-}
-
-export interface TaskSnapshot {
-  state: TaskState
-  mode?: TaskMode
-  videos: DouyinVideo[]
-  counts: TaskCounts
-  progress: {
-    completed: number
-    total: number
-  }
-  currentVideoId?: string
-  hasMore: boolean
-  isLoadingMore: boolean
-  message?: string
-}
-
-export type AccountState = 'checking' | 'signedOut' | 'signedIn'
-
-export interface AccountSnapshot {
-  state: AccountState
-  name?: string
-  avatar?: string
-  likesCount?: number
-  message?: string
-}
-
-export type LoginState = 'idle' | 'loading' | 'ready' | 'verification' | 'error'
-
-export interface LoginSnapshot {
-  state: LoginState
-  qrCode?: string
-  message?: string
-}
+} from '../../shared/removal-policy.js'
 
 type JsonObject = Record<string, unknown>
 type StatusPublisher = (snapshot: TaskSnapshot) => void

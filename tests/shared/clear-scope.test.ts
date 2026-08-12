@@ -7,7 +7,7 @@ import {
   getClearTarget,
   getScopeSelectedIds,
   transitionToManualSelection,
-} from '../src/lib/clear-scope.ts'
+} from '../../src/shared/clear-scope.ts'
 
 const videos = [
   { id: '1', status: 'pending' },

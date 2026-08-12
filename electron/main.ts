@@ -1,19 +1,13 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { DouyinTaskService } from './douyin.js'
+import { createDouyinPlatformModule } from './platforms/douyin/module.js'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 let mainWindow: BrowserWindow | undefined
 
-const douyin = new DouyinTaskService((snapshot) => {
-  mainWindow?.webContents.send('douyin:status', snapshot)
-}, (account) => {
-  mainWindow?.webContents.send('douyin:account', account)
-}, (login) => {
-  mainWindow?.webContents.send('douyin:login', login)
-})
+const douyin = createDouyinPlatformModule(() => mainWindow)
 
 const createWindow = () => {
   mainWindow = new BrowserWindow({
@@ -37,19 +31,6 @@ const createWindow = () => {
 
   void douyin.initialize(mainWindow)
 }
-
-ipcMain.handle('douyin:get-state', () => ({ task: douyin.getTaskSnapshot(), account: douyin.getAccountSnapshot(), login: douyin.getLoginSnapshot() }))
-ipcMain.handle('douyin:show-login', () => douyin.showLogin())
-ipcMain.handle('douyin:refresh-login', () => douyin.refreshLogin())
-ipcMain.handle('douyin:hide-login', () => douyin.hideLogin())
-ipcMain.handle('douyin:scan', () => douyin.scan())
-ipcMain.handle('douyin:load-more', () => douyin.loadMore())
-ipcMain.handle('douyin:start', (_event, selectedIds: string[]) => douyin.start(selectedIds))
-ipcMain.handle('douyin:start-all', (_event, limit?: number) => douyin.startAll(limit))
-ipcMain.handle('douyin:pause', () => douyin.pause())
-ipcMain.handle('douyin:resume', (_event, selectedIds: string[]) => douyin.resume(selectedIds))
-ipcMain.handle('douyin:stop', () => douyin.stop())
-ipcMain.handle('douyin:sign-out', () => douyin.signOut())
 
 app.whenReady().then(() => {
   createWindow()
