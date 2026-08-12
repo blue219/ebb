@@ -4,8 +4,8 @@ import test from 'node:test'
 import type { WebContents } from 'electron'
 
 import {
-  FAVORITES_LIMIT,
-  FAVORITES_PAGE_LIMIT,
+  FAVORITES_PAGE_SIZE,
+  isSafeQrCodeDataUrl,
   registerDouyinNavigationGuards,
 } from './douyin-policy.ts'
 
@@ -56,7 +56,14 @@ test('allows HTTPS navigation inside subframes', () => {
   assert.equal(prevented, false)
 })
 
-test('limits a scan to the first 100 liked videos', () => {
-  assert.equal(FAVORITES_LIMIT, 100)
-  assert.equal(FAVORITES_PAGE_LIMIT, 5)
+test('loads liked videos in pages of 10', () => {
+  assert.equal(FAVORITES_PAGE_SIZE, 10)
+})
+
+test('accepts only bounded raster QR code data URLs', () => {
+  assert.equal(isSafeQrCodeDataUrl('data:image/png;base64,iVBORw0KGgo='), true)
+  assert.equal(isSafeQrCodeDataUrl('data:image/webp;base64,UklGRg=='), true)
+  assert.equal(isSafeQrCodeDataUrl('data:image/svg+xml;base64,PHN2Zz4='), false)
+  assert.equal(isSafeQrCodeDataUrl('https://www.douyin.com/qr.png'), false)
+  assert.equal(isSafeQrCodeDataUrl(`data:image/png;base64,${'a'.repeat(1_000_000)}`), false)
 })

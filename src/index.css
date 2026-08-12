@@ -136,28 +136,38 @@
 
 @layer components {
   .app-shell {
-    background-image: radial-gradient(circle at 10% 0%, rgb(255 255 255 / 0.95), transparent 35%), radial-gradient(circle at 100% 100%, rgb(244 244 245 / 0.7), transparent 32%);
+    background-image: linear-gradient(145deg, rgb(255 255 255 / 0.72), rgb(248 250 252 / 0.48));
   }
 
   .glass-panel {
     @apply rounded-[22px] border border-white/90 bg-white/70 shadow-[0_8px_28px_rgba(0,0,0,0.045)] backdrop-blur-xl;
   }
 
+  .status-rail,
+  .table-surface {
+    @apply rounded-[18px] border border-white/90 bg-white/62 shadow-[0_5px_24px_rgba(15,23,42,0.045)] backdrop-blur-2xl;
+    box-shadow: inset 0 0 0 1px rgb(228 228 231 / 0.58), 0 5px 24px rgb(15 23 42 / 0.045);
+  }
+
   .search-field {
-    @apply flex h-8 items-center gap-2 rounded-lg border border-zinc-200 bg-white/80 px-2.5 text-zinc-400;
+    @apply order-last flex h-9 w-full max-w-80 min-w-0 flex-[1_1_100%] items-center gap-2 rounded-xl border border-zinc-200 bg-white/70 px-3 text-zinc-400 shadow-[inset_0_1px_2px_rgba(0,0,0,0.025)] transition-[border-color,box-shadow,background-color] sm:order-none sm:flex-none;
+  }
+
+  .search-field:focus-within {
+    @apply border-blue-400 bg-white shadow-[0_0_0_3px_rgba(59,130,246,0.12)];
   }
 
   .search-field input {
-    @apply w-36 bg-transparent text-sm text-zinc-800 outline-none placeholder:text-zinc-400 sm:w-44;
+    @apply min-w-0 flex-1 bg-transparent text-[13px] text-zinc-800 outline-none placeholder:text-zinc-400;
   }
 
   .checkmark,
   .video-checkbox {
-    @apply size-4 rounded-[5px] border border-zinc-300 bg-white accent-zinc-900;
+    @apply size-4 rounded-[5px] border border-zinc-300 bg-white accent-blue-600;
   }
 
   .checkmark[data-checked='true'] {
-    @apply border-zinc-900 bg-zinc-900;
+    @apply border-blue-600 bg-blue-600;
   }
 
   .switch {
@@ -165,7 +175,7 @@
   }
 
   .switch[data-checked='true'] {
-    @apply bg-zinc-900;
+    @apply bg-blue-600;
   }
 
   .switch span {
@@ -174,6 +184,66 @@
 
   .switch[data-checked='true'] span {
     @apply translate-x-4;
+  }
+
+  .table-scroll {
+    scrollbar-color: rgb(161 161 170 / 0.55) transparent;
+    scrollbar-width: thin;
+  }
+
+  .removal-progress {
+    @apply relative flex h-9 min-w-36 items-center justify-center overflow-hidden rounded-xl bg-red-600 px-3 text-xs font-medium text-white shadow-[0_5px_14px_rgba(220,38,38,0.18)] transition-[transform,background-color,box-shadow];
+  }
+
+  .removal-progress:hover {
+    @apply bg-red-700 shadow-[0_7px_18px_rgba(220,38,38,0.24)];
+  }
+
+  .removal-progress:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+
+  .removal-progress:disabled {
+    @apply cursor-not-allowed opacity-60;
+  }
+
+  .removal-progress:disabled[data-complete='true'] {
+    @apply cursor-default opacity-100;
+  }
+
+  .removal-progress-fill {
+    @apply absolute inset-y-0 left-0 bg-red-950/30 transition-[width] duration-300 ease-out;
+  }
+
+  .removal-progress-label,
+  .removal-progress-action {
+    @apply relative z-10 flex items-center justify-center gap-1.5 transition-opacity duration-150;
+  }
+
+  .removal-progress-hover {
+    @apply absolute opacity-0;
+  }
+
+  .removal-progress:hover .removal-progress-label {
+    @apply opacity-0;
+  }
+
+  .removal-progress:hover .removal-progress-hover {
+    @apply opacity-100;
+  }
+
+  .video-row-removing {
+    animation: video-row-remove 360ms cubic-bezier(0.32, 0.72, 0, 1) forwards;
+    pointer-events: none;
+    transform-origin: left center;
+  }
+}
+
+@keyframes video-row-remove {
+  to {
+    opacity: 0;
+    filter: blur(2px);
+    transform: translateX(-24px) scale(0.985);
   }
 }
 

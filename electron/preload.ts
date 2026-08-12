@@ -1,13 +1,18 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
-import type { TaskSnapshot } from './douyin.js'
+import type { AccountSnapshot, LoginSnapshot, TaskSnapshot } from './douyin.js'
 
 contextBridge.exposeInMainWorld('ebb', {
   platform: process.platform,
   douyin: {
-    open: () => ipcRenderer.invoke('douyin:open'),
+    getState: () => ipcRenderer.invoke('douyin:get-state'),
+    showLogin: () => ipcRenderer.invoke('douyin:show-login'),
+    refreshLogin: () => ipcRenderer.invoke('douyin:refresh-login'),
+    hideLogin: () => ipcRenderer.invoke('douyin:hide-login'),
     scan: () => ipcRenderer.invoke('douyin:scan'),
+    loadMore: () => ipcRenderer.invoke('douyin:load-more'),
     start: (selectedIds: string[]) => ipcRenderer.invoke('douyin:start', selectedIds),
+    startAll: () => ipcRenderer.invoke('douyin:start-all'),
     pause: () => ipcRenderer.invoke('douyin:pause'),
     resume: (selectedIds: string[]) => ipcRenderer.invoke('douyin:resume', selectedIds),
     stop: () => ipcRenderer.invoke('douyin:stop'),
@@ -16,6 +21,16 @@ contextBridge.exposeInMainWorld('ebb', {
       const listener = (_event: Electron.IpcRendererEvent, snapshot: TaskSnapshot) => callback(snapshot)
       ipcRenderer.on('douyin:status', listener)
       return () => ipcRenderer.removeListener('douyin:status', listener)
+    },
+    onAccount: (callback: (snapshot: AccountSnapshot) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, snapshot: AccountSnapshot) => callback(snapshot)
+      ipcRenderer.on('douyin:account', listener)
+      return () => ipcRenderer.removeListener('douyin:account', listener)
+    },
+    onLogin: (callback: (snapshot: LoginSnapshot) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, snapshot: LoginSnapshot) => callback(snapshot)
+      ipcRenderer.on('douyin:login', listener)
+      return () => ipcRenderer.removeListener('douyin:login', listener)
     },
   },
 })

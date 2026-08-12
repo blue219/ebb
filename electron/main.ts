@@ -9,14 +9,18 @@ let mainWindow: BrowserWindow | undefined
 
 const douyin = new DouyinTaskService((snapshot) => {
   mainWindow?.webContents.send('douyin:status', snapshot)
+}, (account) => {
+  mainWindow?.webContents.send('douyin:account', account)
+}, (login) => {
+  mainWindow?.webContents.send('douyin:login', login)
 })
 
 const createWindow = () => {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
-    minWidth: 960,
-    minHeight: 640,
+    minWidth: 640,
+    minHeight: 560,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -27,15 +31,21 @@ const createWindow = () => {
 
   if (process.env.VITE_DEV_SERVER_URL) {
     void mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
-    return
+  } else {
+    void mainWindow.loadFile(join(currentDirectory, '../dist/index.html'))
   }
 
-  void mainWindow.loadFile(join(currentDirectory, '../dist/index.html'))
+  void douyin.initialize(mainWindow)
 }
 
-ipcMain.handle('douyin:open', () => douyin.openWorkWindow())
+ipcMain.handle('douyin:get-state', () => ({ task: douyin.getTaskSnapshot(), account: douyin.getAccountSnapshot(), login: douyin.getLoginSnapshot() }))
+ipcMain.handle('douyin:show-login', () => douyin.showLogin())
+ipcMain.handle('douyin:refresh-login', () => douyin.refreshLogin())
+ipcMain.handle('douyin:hide-login', () => douyin.hideLogin())
 ipcMain.handle('douyin:scan', () => douyin.scan())
+ipcMain.handle('douyin:load-more', () => douyin.loadMore())
 ipcMain.handle('douyin:start', (_event, selectedIds: string[]) => douyin.start(selectedIds))
+ipcMain.handle('douyin:start-all', () => douyin.startAll())
 ipcMain.handle('douyin:pause', () => douyin.pause())
 ipcMain.handle('douyin:resume', (_event, selectedIds: string[]) => douyin.resume(selectedIds))
 ipcMain.handle('douyin:stop', () => douyin.stop())
@@ -52,3 +62,5 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
+
+app.on('before-quit', () => douyin.dispose())

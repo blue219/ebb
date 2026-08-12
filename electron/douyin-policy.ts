@@ -1,8 +1,13 @@
 import type { WebContents } from 'electron'
 
-export const FAVORITES_PAGE_SIZE = 20
-export const FAVORITES_LIMIT = 100
-export const FAVORITES_PAGE_LIMIT = Math.ceil(FAVORITES_LIMIT / FAVORITES_PAGE_SIZE)
+export const FAVORITES_PAGE_SIZE = 10
+const MAX_QR_CODE_LENGTH = 1_000_000
+
+export const isSafeQrCodeDataUrl = (value: unknown): value is string => (
+  typeof value === 'string'
+  && value.length <= MAX_QR_CODE_LENGTH
+  && /^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=\s]+$/i.test(value)
+)
 
 export const isDouyinUrl = (url: string) => {
   try {
