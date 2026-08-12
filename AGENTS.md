@@ -1,14 +1,14 @@
 ## Repository description
 
-`Ebb` is a desktop app for bulk-removing liked videos from Douyin and TikTok.
+`Ebb` is a desktop app for bulk-removing liked videos. Douyin is implemented; TikTok is planned.
 
 ## Goal
 
----
+Provide a private, understandable workflow for reviewing and removing account likes without exporting credentials. See [README.md](README.md) for current capabilities and safety limitations.
 
 ## Local Startup
 
----
+Use Node.js 22 LTS, then run `npm ci` and `npm run dev`. See [README.md](README.md) for all commands and [docs/testing.md](docs/testing.md) before using a real account.
 
 ## Tech stack
 
@@ -30,8 +30,9 @@ Do not upgrade major versions without a clear reason.
 
 ## Repository structure
 
----
+Platform code is grouped across `shared/platforms/`, `electron/platforms/`, and `src/platforms/`; composition roots remain in `electron/main.ts`, `electron/preload.ts`, and `src/App.tsx`. See [docs/architecture.md](docs/architecture.md) for ownership and process boundaries.
 
 ## Project rules
 
 - Design the front end in Apple Liquid Glass UI style
+- You can do tests with my current real account
