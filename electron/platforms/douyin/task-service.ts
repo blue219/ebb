@@ -847,11 +847,20 @@ export class DouyinTaskService {
   }
 
   private createSnapshot(selectedIds = new Set<string>()): TaskSnapshot {
+    let selected = 0
+    let completed = 0
+    let failed = 0
+    // Snapshot publication is a hot path during removal, so collect all counts in one pass.
+    for (const video of this.videos) {
+      if (selectedIds.has(video.id)) selected += 1
+      if (video.status === 'completed') completed += 1
+      else if (video.status === 'failed') failed += 1
+    }
     const counts: TaskCounts = {
       loaded: this.videos.length,
-      selected: this.videos.filter((video) => selectedIds.has(video.id)).length,
-      completed: this.taskMode ? this.taskCompleted : this.videos.filter((video) => video.status === 'completed').length,
-      failed: this.videos.filter((video) => video.status === 'failed').length,
+      selected,
+      completed: this.taskMode ? this.taskCompleted : completed,
+      failed,
     }
     return {
       state: this.state,

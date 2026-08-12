@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type UIEvent, type WheelEvent } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type UIEvent, type WheelEvent } from 'react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -11,6 +11,7 @@ import {
 } from '@/shared/clear-scope'
 import type {
   AccountSnapshot,
+  DouyinVideo,
   LoginSnapshot,
   TaskSnapshot,
   VideoStatus,
@@ -58,6 +59,29 @@ function Icon({ name, className = '' }: { name: IconName; className?: string }) 
   if (name === 'warning') return <svg {...props}><path d="m12 4 8 15H4L12 4Z" /><path d="M12 9v4M12 16h.01" /></svg>
   return <svg {...props}><path d="m7 7 10 10M17 7 7 17" /></svg>
 }
+
+type VideoRowProps = {
+  id: string
+  title: string
+  thumbnail?: string
+  status: VideoStatus
+  index: number
+  selected: boolean
+  taskLocked: boolean
+  statusLabel: string
+  onToggle: (id: string) => void
+  onDismiss: (id: string) => void
+}
+
+// Status snapshots arrive after each removal; memoizing rows keeps unchanged videos out of that hot render path.
+const VideoRow = memo(function VideoRow({ id, title, thumbnail, status, index, selected, taskLocked, statusLabel, onToggle, onDismiss }: VideoRowProps) {
+  return <tr className={`border-t border-zinc-100/90 transition-colors hover:bg-zinc-50/80 ${selected ? 'bg-blue-50/65 hover:bg-blue-50/80' : ''} ${status === 'completed' ? 'video-row-removing' : ''}`} onAnimationEnd={() => status === 'completed' && onDismiss(id)}>
+    <td className="px-3 py-2 sm:px-5"><input aria-label={title} className="video-checkbox" type="checkbox" checked={selected} disabled={taskLocked || status === 'completed'} onChange={() => onToggle(id)} /></td>
+    <td className="px-1 py-2 text-center text-[11px] tabular-nums text-zinc-400">{index + 1}</td>
+    <td className="max-w-0 overflow-hidden px-2 py-2 sm:px-3"><div className="flex min-w-0 items-center gap-2 sm:gap-3">{thumbnail ? <img className="size-8 shrink-0 rounded-lg object-cover sm:size-10" src={thumbnail} alt="" loading="lazy" decoding="async" /> : <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-zinc-100 sm:size-10"><Icon name="heart" className="size-4 text-zinc-400" /></div>}<span className="min-w-0 truncate text-[13px] font-medium text-zinc-800 sm:text-sm" title={title}>{title}</span></div></td>
+    <td className={`whitespace-nowrap px-2 py-2 text-xs font-medium sm:px-3 ${statusStyles[status]}`}>{status === 'processing' && <Icon name="loader" className="mr-1 size-3 animate-spin" />}{statusLabel}</td>
+  </tr>
+})
 
 function DouyinWorkspace() {
   const [locale, setLocale] = useState<Locale>('en')
@@ -110,12 +134,21 @@ function DouyinWorkspace() {
     }
   }, [loginOpen])
 
-  const visibleVideos = useMemo(() => snapshot.videos.filter((video) => !dismissedVideoIds.has(video.id)), [dismissedVideoIds, snapshot.videos])
-
-  const manualIdsForRemoval = useMemo(() => snapshot.videos
-    .filter((video) => selectedIds.has(video.id) && video.status !== 'completed')
-    .map((video) => video.id), [selectedIds, snapshot.videos])
-  const loadedPendingCount = snapshot.videos.filter((video) => video.status !== 'completed').length
+  // Derive the three list views together because this runs for every status snapshot during removal.
+  const { visibleVideos, manualIdsForRemoval, loadedPendingCount } = useMemo(() => {
+    const visibleVideos: DouyinVideo[] = []
+    const manualIdsForRemoval: string[] = []
+    let loadedPendingCount = 0
+    for (const video of snapshot.videos) {
+      if (!dismissedVideoIds.has(video.id)) visibleVideos.push(video)
+      if (video.status === 'completed') continue
+      loadedPendingCount += 1
+      if (selectedIds.has(video.id)) manualIdsForRemoval.push(video.id)
+    }
+    return { visibleVideos, manualIdsForRemoval, loadedPendingCount }
+  }, [dismissedVideoIds, selectedIds, snapshot.videos])
+  const selectionContextRef = useRef({ clearScope, visibleVideos, taskState: snapshot.state, customLabel: t.custom })
+  selectionContextRef.current = { clearScope, visibleVideos, taskState: snapshot.state, customLabel: t.custom }
   const totalLikes = Math.max(0, account.likesCount ?? loadedPendingCount)
   const effectiveSelectedIds = useMemo(
     () => getScopeSelectedIds(clearScope, visibleVideos, selectedIds),
@@ -193,7 +226,7 @@ function DouyinWorkspace() {
     }
   }
 
-  const dismissCompletedVideo = (id: string) => {
+  const dismissCompletedVideo = useCallback((id: string) => {
     const timeout = completedDismissTimersRef.current.get(id)
     if (timeout) clearTimeout(timeout)
     completedDismissTimersRef.current.delete(id)
@@ -203,7 +236,7 @@ function DouyinWorkspace() {
       next.delete(id)
       return next
     })
-  }
+  }, [])
 
   useEffect(() => {
     if (account.state === 'signedOut') {
@@ -252,7 +285,7 @@ function DouyinWorkspace() {
       const timeout = setTimeout(() => dismissCompletedVideo(video.id), 360)
       completedDismissTimersRef.current.set(video.id, timeout)
     }
-  }, [dismissedVideoIds, snapshot.videos])
+  }, [dismissCompletedVideo, dismissedVideoIds, snapshot.videos])
 
   useEffect(() => () => {
     for (const timeout of completedDismissTimersRef.current.values()) clearTimeout(timeout)
@@ -309,14 +342,15 @@ function DouyinWorkspace() {
     else setScopeInput(t.all)
   }
 
-  const toggleVideo = (id: string) => {
+  const toggleVideo = useCallback((id: string) => {
+    const { clearScope, visibleVideos, taskState, customLabel } = selectionContextRef.current
     // The first row interaction promotes generated All/limit checks into an explicit manual selection.
     setSelectedIds((current) => transitionToManualSelection(clearScope, visibleVideos, current, id))
     setClearScope({ kind: 'manual' })
-    setScopeInput(t.custom)
+    setScopeInput(customLabel)
     setScopeMenuOpen(false)
-    if (snapshot.state === 'completed') setCompletedControlDismissed(true)
-  }
+    if (taskState === 'completed') setCompletedControlDismissed(true)
+  }, [])
 
   const prepareClear = () => {
     if (clearTarget <= 0) return
@@ -464,12 +498,19 @@ function DouyinWorkspace() {
                 <tr><th className="px-3 py-2.5 sm:px-5" /><th className="px-1 py-2.5 text-center">#</th><th className="px-2 py-2.5 sm:px-3">{t.title}</th><th className="px-2 py-2.5 sm:px-3">{t.status}</th></tr>
               </thead>
               <tbody>
-                {visibleVideos.map((video, index) => <tr className={`border-t border-zinc-100/90 transition-colors hover:bg-zinc-50/80 ${effectiveSelectedIds.has(video.id) ? 'bg-blue-50/65 hover:bg-blue-50/80' : ''} ${video.status === 'completed' ? 'video-row-removing' : ''}`} key={video.id} onAnimationEnd={() => video.status === 'completed' && dismissCompletedVideo(video.id)}>
-                  <td className="px-3 py-2 sm:px-5"><input aria-label={video.title} className="video-checkbox" type="checkbox" checked={effectiveSelectedIds.has(video.id)} disabled={isTaskLocked || video.status === 'completed'} onChange={() => toggleVideo(video.id)} /></td>
-                  <td className="px-1 py-2 text-center text-[11px] tabular-nums text-zinc-400">{index + 1}</td>
-                  <td className="max-w-0 overflow-hidden px-2 py-2 sm:px-3"><div className="flex min-w-0 items-center gap-2 sm:gap-3">{video.thumbnail ? <img className="size-8 shrink-0 rounded-lg object-cover sm:size-10" src={video.thumbnail} alt="" /> : <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-zinc-100 sm:size-10"><Icon name="heart" className="size-4 text-zinc-400" /></div>}<span className="min-w-0 truncate text-[13px] font-medium text-zinc-800 sm:text-sm" title={video.title}>{video.title}</span></div></td>
-                  <td className={`whitespace-nowrap px-2 py-2 text-xs font-medium sm:px-3 ${statusStyles[video.status]}`}>{video.status === 'processing' && <Icon name="loader" className="mr-1 size-3 animate-spin" />}{statusLabel(video.status)}</td>
-                </tr>)}
+                {visibleVideos.map((video, index) => <VideoRow
+                  key={video.id}
+                  id={video.id}
+                  title={video.title}
+                  thumbnail={video.thumbnail}
+                  status={video.status}
+                  index={index}
+                  selected={effectiveSelectedIds.has(video.id)}
+                  taskLocked={isTaskLocked}
+                  statusLabel={statusLabel(video.status)}
+                  onToggle={toggleVideo}
+                  onDismiss={dismissCompletedVideo}
+                />)}
               </tbody>
             </table>
           </div> : <div className="grid flex-1 place-items-center px-6 py-14 text-center"><div><div className="mx-auto flex size-11 items-center justify-center rounded-2xl bg-zinc-100"><Icon name="heart" className="size-5 text-zinc-500" /></div><h2 className="mt-4 text-base font-semibold">{t.emptyTitle}</h2><p className="mt-1 max-w-xs text-sm leading-5 text-zinc-500">{t.emptyBody}</p></div></div>}
