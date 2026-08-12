@@ -2,6 +2,24 @@ export type TaskState = 'idle' | 'scanning' | 'ready' | 'running' | 'paused' | '
 export type TaskMode = 'selected' | 'limited' | 'all'
 export type VideoStatus = 'pending' | 'processing' | 'completed' | 'failed'
 
+export const DOUYIN_IPC_CHANNELS = {
+  getState: 'douyin:get-state',
+  showLogin: 'douyin:show-login',
+  refreshLogin: 'douyin:refresh-login',
+  hideLogin: 'douyin:hide-login',
+  scan: 'douyin:scan',
+  loadMore: 'douyin:load-more',
+  start: 'douyin:start',
+  startAll: 'douyin:start-all',
+  pause: 'douyin:pause',
+  resume: 'douyin:resume',
+  stop: 'douyin:stop',
+  signOut: 'douyin:sign-out',
+  status: 'douyin:status',
+  account: 'douyin:account',
+  login: 'douyin:login',
+} as const
+
 export interface DouyinVideo {
   id: string
   title: string

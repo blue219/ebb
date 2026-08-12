@@ -1,5 +1,4 @@
-import assert from 'node:assert/strict'
-import test from 'node:test'
+import { expect, test } from 'vitest'
 
 import {
   createAutomaticRemovalPlan,
@@ -8,22 +7,22 @@ import {
 } from './removal-policy.ts'
 
 test('creates bounded and all-account removal plans', () => {
-  assert.deepEqual(createAutomaticRemovalPlan(undefined, 240, 10), { mode: 'all', total: 240 })
-  assert.deepEqual(createAutomaticRemovalPlan(7, 240, 10), { mode: 'limited', total: 7 })
-  assert.deepEqual(createAutomaticRemovalPlan(25, 240, 10), { mode: 'limited', total: 25 })
-  assert.deepEqual(createAutomaticRemovalPlan(240, 240, 10), { mode: 'limited', total: 240 })
+  expect(createAutomaticRemovalPlan(undefined, 240, 10)).toEqual({ mode: 'all', total: 240 })
+  expect(createAutomaticRemovalPlan(7, 240, 10)).toEqual({ mode: 'limited', total: 7 })
+  expect(createAutomaticRemovalPlan(25, 240, 10)).toEqual({ mode: 'limited', total: 25 })
+  expect(createAutomaticRemovalPlan(240, 240, 10)).toEqual({ mode: 'limited', total: 240 })
 })
 
 test('rejects invalid and excessive limits', () => {
-  assert.throws(() => createAutomaticRemovalPlan(0, 20, 10), /positive integer/)
-  assert.throws(() => createAutomaticRemovalPlan(1.5, 20, 10), /positive integer/)
-  assert.throws(() => createAutomaticRemovalPlan(21, 20, 10), /cannot exceed/)
-  assert.throws(() => createAutomaticRemovalPlan(10, 5, 20), /cannot exceed/)
+  expect(() => createAutomaticRemovalPlan(0, 20, 10)).toThrow(/positive integer/)
+  expect(() => createAutomaticRemovalPlan(1.5, 20, 10)).toThrow(/positive integer/)
+  expect(() => createAutomaticRemovalPlan(21, 20, 10)).toThrow(/cannot exceed/)
+  expect(() => createAutomaticRemovalPlan(10, 5, 20)).toThrow(/cannot exceed/)
 })
 
 test('stops limited removal at its frozen target', () => {
-  assert.equal(remainingAutomaticTarget('limited', 10, 25), 15)
-  assert.equal(hasReachedAutomaticTarget('limited', 24, 25), false)
-  assert.equal(hasReachedAutomaticTarget('limited', 25, 25), true)
-  assert.equal(hasReachedAutomaticTarget('all', 25, 25), false)
+  expect(remainingAutomaticTarget('limited', 10, 25)).toBe(15)
+  expect(hasReachedAutomaticTarget('limited', 24, 25)).toBe(false)
+  expect(hasReachedAutomaticTarget('limited', 25, 25)).toBe(true)
+  expect(hasReachedAutomaticTarget('all', 25, 25)).toBe(false)
 })

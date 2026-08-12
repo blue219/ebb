@@ -10,7 +10,11 @@ lerna-debug.log*
 node_modules
 dist
 dist-electron
+dist-e2e
 dist-ssr
+coverage
+test-results
+playwright-report
 *.local
 
 # Editor directories and files

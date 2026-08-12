@@ -1,35 +1,24 @@
 import { ipcMain, type BrowserWindow } from 'electron'
 
+import { DOUYIN_IPC_CHANNELS } from '../../../shared/platforms/douyin/contracts.js'
+import { ElectronDouyinClient } from './electron-client.js'
+import { registerDouyinIpcHandlers } from './ipc-handlers.js'
 import { DouyinTaskService } from './task-service.js'
 
 export function createDouyinPlatformModule(getHostWindow: () => BrowserWindow | undefined) {
-  const taskService = new DouyinTaskService((snapshot) => {
-    getHostWindow()?.webContents.send('douyin:status', snapshot)
+  const client = new ElectronDouyinClient(getHostWindow)
+  const taskService = new DouyinTaskService(client, (snapshot) => {
+    getHostWindow()?.webContents.send(DOUYIN_IPC_CHANNELS.status, snapshot)
   }, (account) => {
-    getHostWindow()?.webContents.send('douyin:account', account)
+    getHostWindow()?.webContents.send(DOUYIN_IPC_CHANNELS.account, account)
   }, (login) => {
-    getHostWindow()?.webContents.send('douyin:login', login)
+    getHostWindow()?.webContents.send(DOUYIN_IPC_CHANNELS.login, login)
   })
 
-  ipcMain.handle('douyin:get-state', () => ({
-    task: taskService.getTaskSnapshot(),
-    account: taskService.getAccountSnapshot(),
-    login: taskService.getLoginSnapshot(),
-  }))
-  ipcMain.handle('douyin:show-login', () => taskService.showLogin())
-  ipcMain.handle('douyin:refresh-login', () => taskService.refreshLogin())
-  ipcMain.handle('douyin:hide-login', () => taskService.hideLogin())
-  ipcMain.handle('douyin:scan', () => taskService.scan())
-  ipcMain.handle('douyin:load-more', () => taskService.loadMore())
-  ipcMain.handle('douyin:start', (_event, selectedIds: string[]) => taskService.start(selectedIds))
-  ipcMain.handle('douyin:start-all', (_event, limit?: number) => taskService.startAll(limit))
-  ipcMain.handle('douyin:pause', () => taskService.pause())
-  ipcMain.handle('douyin:resume', (_event, selectedIds: string[]) => taskService.resume(selectedIds))
-  ipcMain.handle('douyin:stop', () => taskService.stop())
-  ipcMain.handle('douyin:sign-out', () => taskService.signOut())
+  registerDouyinIpcHandlers(ipcMain, taskService)
 
   return {
-    initialize: (hostWindow: BrowserWindow) => taskService.initialize(hostWindow),
+    initialize: (_hostWindow: BrowserWindow) => taskService.initialize(),
     dispose: () => taskService.dispose(),
   }
 }

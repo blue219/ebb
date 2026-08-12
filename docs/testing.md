@@ -1,6 +1,6 @@
 # Testing
 
-Ebb has deterministic unit checks for local policy and scope logic. Its Douyin integration uses a real account and private web API, so end-to-end verification is manual and destructive.
+Ebb separates deterministic checks from the one destructive release check. Automated tests never load Douyin, read the persistent account partition, or send an unlike request to a real account.
 
 ## Automated checks
 
@@ -8,33 +8,49 @@ Run the smallest relevant command first:
 
 ```bash
 npm test
-npm run lint
-npm run build
+npm run test:typecheck
+npm run test:coverage
+npm run test:e2e
+npm run verify
 ```
 
-`npm test` covers:
+- `npm test` runs Node and jsdom tests with Vitest.
+- `npm run test:watch` keeps Vitest running during development.
+- `npm run test:coverage` enforces lines/statements/functions at 80% and branches at 70% across deterministic critical modules.
+- `npm run test:typecheck` type-checks test sources and test-only configuration.
+- `npm run test:e2e` builds the app and a separate Electron fixture, then runs Playwright against the production renderer and preload.
+- `npm run verify` is the local release gate: coverage, test type-checking, lint, build, and offline Electron smoke.
 
-- Douyin navigation and QR-image policy.
-- Automatic-removal limits and completion rules.
-- Renderer clear-scope selection and clamping.
+The automated layers cover:
 
-There is currently no automated browser, IPC integration, or live-Douyin test suite.
+- Clear-scope calculation and automatic-removal policy.
+- Navigation, QR-image, login-surface, and untrusted-response policy.
+- Account checks, pagination, deduplication, selected/limited/all removal, replacement rows, pause, continue, stop, rejected requests, stale counts, sign out, and workspace crashes.
+- Preload command/event mapping and main-process IPC registration.
+- QR sign-in presentation, scope selection and confirmation, progress controls, error presentation, language switching, and load-more de-duplication.
+- Electron startup, preload availability, sandbox settings, offline removal flow, and injected failure behavior.
 
-## Real-account smoke test
+The Electron fixture uses `test-results/` for failure screenshots and traces. It uses a new temporary user-data directory for every test, does not create `persist:ebb-douyin`, and fails if the app attempts an external HTTP(S) request.
 
-> This procedure removes real likes and Ebb cannot restore them. Use a video you are willing to unlike. Do not start with **All**.
+## Real-account release check
 
-1. Run `npm run dev` and sign in by QR code.
-2. Confirm that the account name, Likes count, and first 10 rows load.
-3. Scroll near the end of the table and confirm another page loads when more likes exist.
-4. Select one expendable video so the scope changes to **Custom**.
-5. Confirm that the displayed clear target is 1, start the task, and verify it reaches **Completed**.
-6. Check in Douyin that the like was removed and that Ebb's Likes count decreased by one.
-7. Restart Ebb and confirm the saved session restores without another QR scan.
-8. Choose **Sign out**, restart, and confirm Ebb asks for a QR scan.
+> This procedure removes one real like and Ebb cannot restore it. Choose a video you are willing to unlike. Never use **All** for release verification.
 
-For pause and stop checks, use a small numeric scope with multiple expendable likes. Because control is cooperative, allow the current request to finish before asserting that no further rows change.
+1. Run `npm run verify`; do not continue unless every automated gate passes.
+2. Run `npm run dev` and sign in by QR code.
+3. Confirm that the account name, Likes count, and first 10 rows load.
+4. Scroll near the end of the table and confirm another page loads when more likes exist.
+5. Select exactly one expendable video so the scope changes to **Custom**.
+6. Confirm that the displayed clear target is 1, start the task, and verify it reaches **Completed**.
+7. Check in Douyin that the like was removed and that Ebb's Likes count decreased by one.
+8. Restart Ebb and confirm the saved session restores without another QR scan.
+9. Choose **Sign out**, restart, and confirm Ebb asks for a QR scan.
 
-## External failure checks
+Pause, continue, stop, rate-limit, and rejected-response scenarios are covered by deterministic fixtures. Do not spend additional real likes to repeat them.
 
-If Douyin rejects a request or requests verification, verify that Ebb pauses and shows the error instead of continuing mutations. Ebb has no general-purpose browser for interactive security challenges. Stop the task, sign out, sign in again with a refreshed QR code, and retry a small scope. Do not repeatedly retry a rate-limited account.
+## Failure handling
+
+- For a Vitest failure, run the reported file directly with `npx vitest run <path>`.
+- For an Electron failure, inspect the retained trace or screenshot under `test-results/`, then rerun `npm run test:e2e`.
+- If the offline Electron test reports an external request, treat it as an isolation regression; the fixture must not be allowed to contact Douyin.
+- If the manual check encounters verification or rate limiting, stop the task. Do not repeatedly retry the account; sign out and retry later with a refreshed QR code.

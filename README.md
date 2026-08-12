@@ -16,7 +16,7 @@ TikTok support and distributable installers are not implemented yet. `npm run bu
 
 ## Development baseline
 
-- Node.js 22 LTS (npm is included with Node.js). This version is documented but not currently enforced by `package.json`.
+- Node.js 22 LTS (npm is included with Node.js). `package.json` and `.nvmrc` record this baseline.
 - Network access to Douyin.
 - A Douyin account and the Douyin mobile app for QR-code sign-in.
 
@@ -34,9 +34,14 @@ npm run dev
 | Command | Purpose |
 | --- | --- |
 | `npm run dev` | Start the renderer development server and Electron app. |
-| `npm test` | Run the removal-policy, platform-policy, and clear-scope unit tests. |
+| `npm test` | Run deterministic Node and renderer tests with Vitest. |
+| `npm run test:watch` | Re-run relevant Vitest tests while developing. |
+| `npm run test:coverage` | Run deterministic tests and enforce coverage thresholds for critical modules. |
+| `npm run test:typecheck` | Type-check test code and test-only configuration. |
+| `npm run test:e2e` | Build and run the isolated, offline Electron smoke suite. |
 | `npm run lint` | Lint the source with oxlint. |
 | `npm run build` | Type-check and write renderer output to `dist/` and Electron output to `dist-electron/`. |
+| `npm run verify` | Run coverage, test type-checking, lint, build, and offline Electron smoke tests. |
 | `npm run preview` | Start Vite's renderer preview server. It has no Electron preload bridge, so the Ebb interface is not operable; use `npm run dev` for the app. |
 
 ## Use Ebb
@@ -78,4 +83,4 @@ Douyin can change its private API, require request signatures, rate-limit reques
 - shadcn/ui (Base UI, Nova style)
 - liquid-glass-react (installed for the intended visual system but not currently imported by the renderer)
 
-The current glass styling is implemented in `src/index.css`. The renderer uses `@/` as an alias for `src/`. Native functionality must be exposed through the sandboxed preload bridge; do not enable Node.js integration in the renderer.
+The current glass styling is implemented in `src/index.css`. The renderer uses `@/` as an alias for `src/`. Native functionality must be exposed through the sandboxed preload bridge; do not enable Node.js integration in the renderer. The Electron smoke fixture uses a temporary user-data directory and in-memory IPC responses; it never loads Douyin or the persistent account partition.

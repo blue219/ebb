@@ -1,5 +1,3 @@
-import { BrowserWindow, session, WebContentsView, type Session } from 'electron'
-
 import type {
   AccountSnapshot,
   DouyinVideo,
@@ -9,123 +7,27 @@ import type {
   TaskSnapshot,
   TaskState,
 } from '../../../shared/platforms/douyin/contracts.js'
-import {
-  FAVORITES_PAGE_SIZE,
-  isDouyinUrl,
-  isSafeQrCodeDataUrl,
-  registerDouyinNavigationGuards,
-} from './policy.js'
+import { FAVORITES_PAGE_SIZE } from './policy.js'
+import type { DouyinClient } from './client.js'
 import {
   createAutomaticRemovalPlan,
   hasReachedAutomaticTarget,
 } from '../../shared/removal-policy.js'
 
-type JsonObject = Record<string, unknown>
 type StatusPublisher = (snapshot: TaskSnapshot) => void
 type AccountPublisher = (snapshot: AccountSnapshot) => void
 type LoginPublisher = (snapshot: LoginSnapshot) => void
 
-const DOUYIN_ORIGIN = 'https://www.douyin.com'
-const DOUYIN_API_ORIGIN = 'https://www-hj.douyin.com'
-const DOUYIN_PARTITION = 'persist:ebb-douyin'
-
-const LOGIN_SURFACE_SCRIPT = `
-  (async () => {
-    const isVisibleSquare = (element) => {
-      const rect = element.getBoundingClientRect()
-      const style = getComputedStyle(element)
-      return rect.width >= 100 && rect.width <= 600
-        && rect.height >= 100 && rect.height <= 600
-        && Math.abs(rect.width - rect.height) <= 24
-        && style.display !== 'none'
-        && style.visibility !== 'hidden'
-    }
-
-    const pageText = document.body?.innerText || ''
-    if (/验证码|安全验证|完成验证|captcha|security verification/i.test(pageText)) {
-      return { state: 'verification' }
-    }
-    if (/二维码.{0,12}(?:失效|过期)|QR code.{0,12}expired/i.test(pageText)) {
-      const refreshControl = [...document.querySelectorAll('button, [role="button"]')].find((element) => (
-        /刷新|Refresh/i.test(element.textContent || '') && !element.hasAttribute('disabled')
-      ))
-      if (refreshControl) refreshControl.click()
-      return { state: 'loading' }
-    }
-
-    const imageSelectors = [
-      'img[aria-label*="二维码"]',
-      'img[alt*="二维码"]',
-      '[class*="qrcode" i] img',
-      '[class*="qr-code" i] img',
-    ]
-    const image = [...document.querySelectorAll(imageSelectors.join(','))].find(isVisibleSquare)
-    if (image) {
-      const source = image.currentSrc || image.src
-      if (source.startsWith('data:image/')) return { state: 'ready', qrCode: source }
-      if (source) {
-        try {
-          const response = await fetch(source, { credentials: 'include' })
-          const blob = await response.blob()
-          const allowedTypes = ['image/png', 'image/jpeg', 'image/webp']
-          if (blob.size > 750_000 || !allowedTypes.includes(blob.type.toLowerCase())) return { state: 'loading' }
-          const qrCode = await new Promise((resolve, reject) => {
-            const reader = new FileReader()
-            reader.onload = () => resolve(reader.result)
-            reader.onerror = () => reject(reader.error)
-            reader.readAsDataURL(blob)
-          })
-          return { state: 'ready', qrCode }
-        } catch {}
-      }
-    }
-
-    const canvasSelectors = ['[class*="qrcode" i] canvas', '[class*="qr-code" i] canvas']
-    const canvas = [...document.querySelectorAll(canvasSelectors.join(','))].find(isVisibleSquare)
-    if (canvas) {
-      try {
-        return { state: 'ready', qrCode: canvas.toDataURL('image/png') }
-      } catch {}
-    }
-
-    // Douyin may render the login trigger as a plain text div without button semantics.
-    const loginControl = [...document.querySelectorAll('button, [role="button"], a, [tabindex], div, span')].find((element) => {
-      const text = element.textContent?.trim()
-      return (text === '登录' || text === 'Login')
-        && element.children.length === 0
-        && !element.hasAttribute('disabled')
-    })
-    if (loginControl) loginControl.click()
-    return { state: 'loading' }
-  })()
-`
-
 const sleep = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds))
 
-const isObject = (value: unknown): value is JsonObject => typeof value === 'object' && value !== null
-
-const readString = (value: JsonObject, key: string) => {
-  const candidate = value[key]
-  return typeof candidate === 'string' || typeof candidate === 'number' ? String(candidate) : undefined
-}
-
-const readNumber = (value: JsonObject, key: string) => {
-  const raw = value[key]
-  if (typeof raw !== 'string' && typeof raw !== 'number') return undefined
-  const candidate = Number(raw)
-  return Number.isFinite(candidate) ? candidate : undefined
-}
-
 export class DouyinTaskService {
-  private hostWindow?: BrowserWindow
-  private workView?: WebContentsView
   private loginPoll?: NodeJS.Timeout
   private loginAccountPoll?: NodeJS.Timeout
   private loginPollPending = false
   private loginAccountPollPending = false
   private loginQrCapturedAt = 0
   private loginVisible = false
-  private workspaceLoad?: Promise<void>
+  private stopCrashListener?: () => void
   private state: TaskState = 'idle'
   private videos: DouyinVideo[] = []
   private currentVideoId?: string
@@ -144,19 +46,29 @@ export class DouyinTaskService {
   private readonly publish: StatusPublisher
   private readonly publishAccount: AccountPublisher
   private readonly publishLogin: LoginPublisher
+  private readonly client: DouyinClient
+  private readonly wait: (milliseconds: number) => Promise<void>
   private account: AccountSnapshot = { state: 'checking' }
   private login: LoginSnapshot = { state: 'idle' }
 
-  constructor(publish: StatusPublisher, publishAccount: AccountPublisher, publishLogin: LoginPublisher) {
+  constructor(
+    client: DouyinClient,
+    publish: StatusPublisher,
+    publishAccount: AccountPublisher,
+    publishLogin: LoginPublisher,
+    wait: (milliseconds: number) => Promise<void> = sleep,
+  ) {
+    this.client = client
     this.publish = publish
     this.publishAccount = publishAccount
     this.publishLogin = publishLogin
+    this.wait = wait
   }
 
-  async initialize(hostWindow: BrowserWindow) {
+  async initialize() {
     this.hideLogin()
-    this.hostWindow = hostWindow
-    await this.ensureWorkspaceLoaded()
+    this.stopCrashListener = this.client.onWorkspaceCrash(() => this.handleWorkspaceCrash())
+    await this.client.initialize()
     await this.refreshAccount()
   }
 
@@ -173,7 +85,7 @@ export class DouyinTaskService {
   }
 
   async showLogin() {
-    await this.ensureWorkspaceLoaded()
+    await this.client.initialize()
     this.loginVisible = true
     if (this.login.state !== 'ready' || Date.now() - this.loginQrCapturedAt > 60_000) {
       this.setLoginSnapshot({ state: 'loading' })
@@ -184,9 +96,8 @@ export class DouyinTaskService {
   }
 
   async refreshLogin() {
-    const workView = await this.ensureWorkspaceLoaded()
     this.setLoginSnapshot({ state: 'loading' })
-    await workView.webContents.loadURL(DOUYIN_ORIGIN)
+    await this.client.refreshLogin()
     if (this.loginVisible) await this.pollLogin()
   }
 
@@ -197,34 +108,16 @@ export class DouyinTaskService {
 
   dispose() {
     this.hideLogin()
-    if (this.workView && !this.workView.webContents.isDestroyed()) this.workView.webContents.close()
-    this.workView = undefined
-    this.workspaceLoad = undefined
+    this.stopCrashListener?.()
+    this.stopCrashListener = undefined
+    this.client.dispose()
   }
 
-  private createWorkspaceView() {
-    this.workspaceLoad = undefined
-    const workView = new WebContentsView({
-      webPreferences: {
-        backgroundThrottling: false,
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: true,
-        partition: DOUYIN_PARTITION,
-      },
-    })
-    // The view stays detached, but a stable viewport is required for responsive login controls to render.
-    workView.setBounds({ x: 0, y: 0, width: 1280, height: 800 })
-    workView.setBorderRadius(18)
-    registerDouyinNavigationGuards(workView.webContents)
-    workView.webContents.on('render-process-gone', () => {
-      this.stopLoginPolling()
-      this.setLoginSnapshot({ state: 'error', message: 'The Douyin sign-in process stopped unexpectedly.' })
-      this.account = { state: 'signedOut', message: 'The Douyin sign-in page stopped unexpectedly. Try again.' }
-      this.publishAccountSnapshot()
-    })
-    this.workView = workView
-    return workView
+  private handleWorkspaceCrash() {
+    this.stopLoginPolling()
+    this.setLoginSnapshot({ state: 'error', message: 'The Douyin sign-in process stopped unexpectedly.' })
+    this.account = { state: 'signedOut', message: 'The Douyin sign-in page stopped unexpectedly. Try again.' }
+    this.publishAccountSnapshot()
   }
 
   async scan() {
@@ -364,8 +257,7 @@ export class DouyinTaskService {
     this.stop()
     this.hideLogin()
     this.setLoginSnapshot({ state: 'idle' })
-    await session.fromPartition(DOUYIN_PARTITION).clearStorageData()
-    if (this.workView && !this.workView.webContents.isDestroyed()) await this.workView.webContents.loadURL(DOUYIN_ORIGIN)
+    await this.client.clearSession()
     this.account = { state: 'signedOut' }
     this.secUserId = undefined
     this.nextCursor = '0'
@@ -391,12 +283,7 @@ export class DouyinTaskService {
         this.publishSnapshot(selectedIds)
 
         try {
-          const payload = await this.requestApi('/aweme/v1/web/commit/item/digg/', {
-            aid: '6383',
-            aweme_id: video.id,
-            type: '0',
-          }, 'POST')
-          this.throwIfApiError(payload)
+          await this.client.unlike(video.id)
           video.status = 'completed'
           this.taskCompleted += 1
           if (this.account.likesCount !== undefined && this.account.likesCount > 0) {
@@ -419,7 +306,7 @@ export class DouyinTaskService {
           // A replacement fetch must not turn a successful unlike operation into a failed removal.
         }
         this.publishSnapshot(selectedIds)
-        await sleep(180 + Math.round(Math.random() * 140))
+        await this.wait(180 + Math.round(Math.random() * 140))
       }
 
       if (this.state === 'running') {
@@ -469,12 +356,7 @@ export class DouyinTaskService {
           this.publishSnapshot()
 
           try {
-            const payload = await this.requestApi('/aweme/v1/web/commit/item/digg/', {
-              aid: '6383',
-              aweme_id: video.id,
-              type: '0',
-            }, 'POST')
-            this.throwIfApiError(payload)
+            await this.client.unlike(video.id)
             video.status = 'completed'
             this.taskProcessedIds.add(video.id)
             this.taskCompleted += 1
@@ -496,7 +378,7 @@ export class DouyinTaskService {
             this.completeAutomaticTask(false)
             return
           }
-          await sleep(180 + Math.round(Math.random() * 140))
+          await this.wait(180 + Math.round(Math.random() * 140))
         }
       }
     } catch (error) {
@@ -526,7 +408,14 @@ export class DouyinTaskService {
         this.publishSnapshot()
         return
       }
-      await sleep(600 * (attempt + 1))
+      await this.wait(600 * (attempt + 1))
+    }
+
+    if (this.taskMode === 'limited') {
+      this.videos = []
+      this.hasMore = false
+      this.publishSnapshot()
+      return
     }
 
     throw new Error('Douyin still reports liked videos but did not return a new batch. Continue to retry.')
@@ -585,126 +474,7 @@ export class DouyinTaskService {
     this.taskTotal = 0
   }
 
-  private async getCurrentUser() {
-    const payload = await this.requestApi('/aweme/v1/web/user/profile/self/', { aid: '6383' })
-    this.throwIfApiError(payload)
-
-    const data = isObject(payload.data) ? payload.data : undefined
-    const candidates = [payload.user, payload.user_info, data?.user, data?.user_info, data].filter(isObject)
-    for (const user of candidates) {
-      const secUserId = readString(user, 'sec_uid') ?? readString(user, 'sec_user_id')
-      if (!secUserId) continue
-      const avatarObject = isObject(user.avatar_thumb) ? user.avatar_thumb : undefined
-      const avatarSources = avatarObject && Array.isArray(avatarObject.url_list) ? avatarObject.url_list : []
-      return {
-        secUserId,
-        name: readString(user, 'nickname') ?? readString(user, 'unique_id') ?? 'Douyin user',
-        avatar: avatarSources.find((source): source is string => typeof source === 'string'),
-        likesCount: readNumber(user, 'favoriting_count'),
-      }
-    }
-    throw new Error('Douyin did not return the current user. Sign in again and retry.')
-  }
-
-  private toVideo(record: JsonObject): DouyinVideo | undefined {
-    const id = readString(record, 'aweme_id')
-    if (!id) return undefined
-
-    const video = isObject(record.video) ? record.video : undefined
-    const cover = video && isObject(video.cover) ? video.cover : undefined
-    const sources = cover && Array.isArray(cover.url_list) ? cover.url_list : []
-    const thumbnail = sources.find((source): source is string => typeof source === 'string')
-    return {
-      id,
-      title: readString(record, 'desc') || 'Untitled video',
-      thumbnail,
-      status: 'pending',
-    }
-  }
-
-  private async requestApi(path: string, query: Record<string, string>, method: 'GET' | 'POST' = 'GET') {
-    const url = new URL(path, DOUYIN_API_ORIGIN)
-    for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value)
-    const webContents = this.getWorkspaceView().webContents
-    if (!isDouyinUrl(webContents.getURL())) {
-      throw new Error('Wait for the Douyin sign-in page to finish loading, then scan again.')
-    }
-
-    // Douyin validates the browser page context in addition to the signed-in session cookies.
-    const result: unknown = await webContents.executeJavaScript(`
-      (async () => {
-        const response = await fetch(${JSON.stringify(url.href)}, {
-          credentials: 'include',
-          headers: { Accept: 'application/json, text/plain, */*' },
-          method: ${JSON.stringify(method)},
-        })
-        return { ok: response.ok, status: response.status, text: await response.text() }
-      })()
-    `)
-    if (!isObject(result) || typeof result.text !== 'string') {
-      throw new Error('Douyin returned an unreadable API response.')
-    }
-
-    const text = result.text
-    let payload: JsonObject
-    try {
-      const parsed: unknown = JSON.parse(text)
-      payload = isObject(parsed) ? parsed : { status_code: result.status, status_msg: text.slice(0, 240) }
-    } catch {
-      payload = { status_code: result.status, status_msg: text.slice(0, 240) }
-    }
-    if (!result.ok && payload.status_code === undefined) payload.status_code = result.status
-    return payload
-  }
-
-  private throwIfApiError(payload: JsonObject) {
-    const code = payload.status_code ?? payload.statusCode
-    if (code === undefined || Number(code) === 0) return
-    const detail = readString(payload, 'status_msg') ?? readString(payload, 'message') ?? `status ${String(code)}`
-    throw new Error(`Douyin API request was rejected: ${detail}`)
-  }
-
-  private getWorkspaceSession(): Session {
-    this.getWorkspaceView()
-    return session.fromPartition(DOUYIN_PARTITION)
-  }
-
-  private getHostWindow() {
-    if (!this.hostWindow || this.hostWindow.isDestroyed()) throw new Error('The Ebb window is not available.')
-    return this.hostWindow
-  }
-
-  private getWorkspaceView() {
-    if (!this.workView || this.workView.webContents.isDestroyed()) {
-      throw new Error('The Douyin sign-in page is not available.')
-    }
-    return this.workView
-  }
-
-  private async ensureWorkspaceLoaded() {
-    this.getHostWindow()
-    const workView = this.workView && !this.workView.webContents.isDestroyed()
-      ? this.workView
-      : this.createWorkspaceView()
-    // Startup and the immediately visible login panel may request the workspace concurrently.
-    if (this.workspaceLoad) {
-      await this.workspaceLoad
-      return workView
-    }
-    if (!isDouyinUrl(workView.webContents.getURL())) {
-      const workspaceLoad = workView.webContents.loadURL(DOUYIN_ORIGIN).then(() => undefined)
-      this.workspaceLoad = workspaceLoad
-      try {
-        await workspaceLoad
-      } finally {
-        if (this.workspaceLoad === workspaceLoad) this.workspaceLoad = undefined
-      }
-    }
-    return workView
-  }
-
   private async ensureSignedIn() {
-    this.getWorkspaceSession()
     if (this.account.state !== 'signedIn') await this.refreshAccount()
     if (this.account.state !== 'signedIn') throw new Error('Scan the QR code to sign in before scanning likes.')
   }
@@ -713,8 +483,8 @@ export class DouyinTaskService {
     this.account = { state: 'checking' }
     this.publishAccountSnapshot()
     try {
-      const user = await this.getCurrentUser()
-      this.getWorkspaceSession().flushStorageData()
+      const user = await this.client.getCurrentUser()
+      this.client.flushSession()
       this.secUserId = user.secUserId
       this.account = { state: 'signedIn', name: user.name, avatar: user.avatar, likesCount: user.likesCount }
       this.publishAccountSnapshot()
@@ -772,8 +542,8 @@ export class DouyinTaskService {
     if (!this.loginVisible || this.loginAccountPollPending) return
     this.loginAccountPollPending = true
     try {
-      const user = await this.getCurrentUser()
-      this.getWorkspaceSession().flushStorageData()
+      const user = await this.client.getCurrentUser()
+      this.client.flushSession()
       this.secUserId = user.secUserId
       this.account = { state: 'signedIn', name: user.name, avatar: user.avatar, likesCount: user.likesCount }
       this.publishAccountSnapshot()
@@ -787,14 +557,7 @@ export class DouyinTaskService {
   }
 
   private async readLoginSurface(): Promise<LoginSnapshot> {
-    const result: unknown = await this.getWorkspaceView().webContents.executeJavaScript(LOGIN_SURFACE_SCRIPT)
-    if (!isObject(result)) throw new Error('Douyin did not return a readable QR code state.')
-    if (result.state === 'ready') {
-      if (!isSafeQrCodeDataUrl(result.qrCode)) throw new Error('Douyin returned an invalid QR code image.')
-      return { state: 'ready', qrCode: result.qrCode }
-    }
-    if (result.state === 'verification') return { state: 'verification' }
-    return { state: 'loading' }
+    return this.client.readLoginSurface()
   }
 
   private setLoginSnapshot(snapshot: LoginSnapshot) {
@@ -818,29 +581,14 @@ export class DouyinTaskService {
     this.isLoadingMore = true
     this.publishSnapshot()
     try {
-      if (!this.secUserId) this.secUserId = (await this.getCurrentUser()).secUserId
+      if (!this.secUserId) this.secUserId = (await this.client.getCurrentUser()).secUserId
       const cursor = this.nextCursor
-      const payload = await this.requestApi('/aweme/v1/web/aweme/favorite/', {
-        aid: '6383',
-        count: String(FAVORITES_PAGE_SIZE),
-        max_cursor: cursor,
-        sec_user_id: this.secUserId,
-      })
-      this.throwIfApiError(payload)
-
+      const page = await this.client.loadFavorites(this.secUserId, cursor, FAVORITES_PAGE_SIZE)
       const found = new Map(this.videos.map((video) => [video.id, video]))
-      const records = Array.isArray(payload.aweme_list)
-        ? payload.aweme_list.filter(isObject)
-        : []
-      for (const record of records) {
-        const video = this.toVideo(record)
-        if (video) found.set(video.id, video)
-      }
+      for (const video of page.videos) found.set(video.id, video)
       this.videos = [...found.values()]
-
-      const nextCursor = readString(payload, 'max_cursor')
-      this.hasMore = Boolean(payload.has_more && nextCursor && nextCursor !== cursor)
-      if (nextCursor) this.nextCursor = nextCursor
+      this.hasMore = page.hasMore
+      if (page.nextCursor) this.nextCursor = page.nextCursor
     } finally {
       this.isLoadingMore = false
     }

@@ -17,8 +17,8 @@ React renderer
 - `src/App.tsx` selects the implemented platform workspace.
 - `electron/main.ts` owns the application window and platform-module lifecycle.
 - `electron/preload.ts` exposes the narrow `window.ebb` API.
-- `DouyinTaskService` owns authentication checks, pagination, task execution, and in-memory snapshots.
-- The detached `WebContentsView` supplies the signed-in Douyin browser context required by the API. It is not rendered as a general-purpose browser in the app window.
+- `DouyinTaskService` owns authentication checks, pagination, task execution, and in-memory snapshots through an injected `DouyinClient` interface.
+- `ElectronDouyinClient` is the production adapter for that interface. Its detached `WebContentsView` supplies the signed-in browser context required by Douyin. It is not rendered as a general-purpose browser in the app window.
 
 ## Directory ownership
 
@@ -38,6 +38,7 @@ docs/                             Architecture, domain, and validation documenta
 - Keep `electron/main.ts`, `electron/preload.ts`, and `src/App.tsx` as composition roots.
 - Put platform-owned behavior, copy, security policy, and integration details under the matching `platforms/<platform>` directory.
 - Put cross-process data and bridge interfaces in `shared/platforms/<platform>` so the main process, preload, and renderer use one contract.
+- Keep external Douyin browser operations behind `DouyinClient`; task logic must not directly create Electron views, sessions, or requests.
 - Move behavior into a runtime-specific `shared` directory only after it is platform-independent and reusable.
 - Do not add an empty platform directory or a generic platform adapter before a second implementation exists.
 - Preserve platform names in IPC channels and persisted session keys unless a compatibility migration is explicitly planned.
@@ -76,6 +77,13 @@ Changing the partition name or renderer key is a session migration and must be p
 - API calls execute inside the isolated workspace so Douyin receives the expected browser context and session cookies.
 
 The integration depends on a private external API and must treat every response as untrusted. Keep payload parsing defensive and pause mutation work on rejected responses.
+
+## Test topology
+
+- Vitest Node tests exercise domain policy, response parsing, preload/IPC mapping, and `DouyinTaskService` through an in-memory `DouyinClient` adapter.
+- Vitest jsdom tests exercise renderer behavior and the serializable login-surface detector through accessible user interactions.
+- Playwright launches a separate Electron test entry that loads the production renderer and preload with in-memory IPC handlers. It blocks external HTTP(S) requests and uses a temporary user-data directory, so it cannot reach the real account partition.
+- Live-account verification remains a manual release gate and is limited to one explicitly expendable like.
 
 ## Build outputs
 
