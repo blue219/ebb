@@ -6,9 +6,13 @@ import {
   isSafeQrCodeDataUrl,
   registerDouyinNavigationGuards,
 } from './douyin-policy.js'
+import {
+  createAutomaticRemovalPlan,
+  hasReachedAutomaticTarget,
+} from './removal-policy.js'
 
 export type TaskState = 'idle' | 'scanning' | 'ready' | 'running' | 'paused' | 'completed' | 'stopped'
-export type TaskMode = 'selected' | 'all'
+export type TaskMode = 'selected' | 'limited' | 'all'
 export type VideoStatus = 'pending' | 'processing' | 'completed' | 'failed'
 
 export interface DouyinVideo {
@@ -176,6 +180,7 @@ export class DouyinTaskService {
   private taskMode?: TaskMode
   private taskIds = new Set<string>()
   private taskProcessedIds = new Set<string>()
+  private replacementVideos: DouyinVideo[] = []
   private taskCompleted = 0
   private taskTotal = 0
   private readonly publish: StatusPublisher
@@ -269,6 +274,7 @@ export class DouyinTaskService {
     this.state = 'scanning'
     this.resetTask()
     this.videos = []
+    this.replacementVideos = []
     this.nextCursor = '0'
     this.hasMore = false
     this.message = 'Loading the first 10 liked videos.'
@@ -289,13 +295,14 @@ export class DouyinTaskService {
   }
 
   async loadMore() {
-    if (!this.hasMore || this.isLoadingMore || this.state !== 'ready') return
+    if ((!this.hasMore && !this.replacementVideos.length) || this.isLoadingMore || !['ready', 'completed', 'stopped'].includes(this.state)) return
+    const previousState = this.state
     try {
       await this.ensureSignedIn()
-      await this.loadNextPage()
+      if (!this.appendReplacementVideos(FAVORITES_PAGE_SIZE)) await this.loadNextPage()
       this.message = `Loaded ${this.videos.length} liked videos.${this.hasMore ? ' Scroll down to load more.' : ''}`
     } catch (error) {
-      this.state = 'paused'
+      if (previousState === 'ready') this.state = 'paused'
       this.message = this.errorMessage(error)
     }
     this.publishSnapshot()
@@ -323,20 +330,25 @@ export class DouyinTaskService {
     void this.processQueue(selected)
   }
 
-  async startAll() {
+  async startAll(limit?: number) {
     if (this.isRunning) return
     await this.ensureSignedIn()
 
-    this.taskMode = 'all'
+    const pendingCount = this.videos.filter((video) => video.status !== 'completed').length
+    const plan = createAutomaticRemovalPlan(limit, this.account.likesCount, pendingCount)
+    this.taskMode = plan.mode
     this.taskIds = new Set()
+    this.replacementVideos = []
     this.taskProcessedIds = new Set(this.videos.filter((video) => video.status === 'completed').map((video) => video.id))
     this.taskCompleted = 0
-    this.taskTotal = Math.max(this.account.likesCount ?? 0, this.videos.filter((video) => video.status !== 'completed').length)
+    this.taskTotal = plan.total
     for (const video of this.videos) {
       if (video.status !== 'completed') video.status = 'pending'
     }
     this.state = 'running'
-    this.message = 'Automatically removing every liked video and loading new batches until none remain.'
+    this.message = plan.mode === 'all'
+      ? 'Removing every liked video and loading new batches until none remain.'
+      : `Removing up to ${plan.total} liked videos.`
     this.publishSnapshot()
     void this.processAllLikes()
   }
@@ -369,22 +381,24 @@ export class DouyinTaskService {
 
     this.state = 'running'
     this.message = this.taskMode === 'all'
-      ? 'Continuing automatic removal of every liked video.'
-      : 'Continuing removal of the selected liked videos.'
+      ? 'Continuing removal of every liked video.'
+      : this.taskMode === 'limited'
+        ? `Continuing removal of up to ${this.taskTotal} liked videos.`
+        : 'Continuing removal of the selected liked videos.'
     this.publishSnapshot(this.taskMode === 'selected' ? this.taskIds : undefined)
     // An in-flight worker observes the restored running state before sending its next request.
     if (this.isRunning) return
-    if (this.taskMode === 'all') void this.processAllLikes()
-    else void this.processQueue(this.taskIds)
+    if (this.taskMode === 'selected') void this.processQueue(this.taskIds)
+    else void this.processAllLikes()
   }
 
   stop() {
     if (!['running', 'paused'].includes(this.state)) return
     this.state = 'stopped'
     this.currentVideoId = undefined
-    this.message = this.taskMode === 'all'
-      ? 'Automatic removal stopped. Liked videos remain.'
-      : 'Task stopped. Unprocessed videos remain selected.'
+    this.message = this.taskMode === 'selected'
+      ? 'Task stopped. Unprocessed videos remain selected.'
+      : 'Automatic removal stopped. Liked videos remain.'
     this.publishSnapshot(this.taskMode === 'selected' ? this.taskIds : undefined)
   }
 
@@ -441,6 +455,12 @@ export class DouyinTaskService {
 
         this.currentVideoId = undefined
         this.publishSnapshot(selectedIds)
+        try {
+          await this.loadReplacementVideo()
+        } catch {
+          // A replacement fetch must not turn a successful unlike operation into a failed removal.
+        }
+        this.publishSnapshot(selectedIds)
         await sleep(180 + Math.round(Math.random() * 140))
       }
 
@@ -463,18 +483,17 @@ export class DouyinTaskService {
     try {
       await this.ensureSignedIn()
       while (this.state === 'running') {
+        if (this.taskMode && this.taskMode !== 'selected' && hasReachedAutomaticTarget(this.taskMode, this.taskCompleted, this.taskTotal)) {
+          this.completeAutomaticTask(false)
+          return
+        }
+
         const pendingVideos = this.videos.filter((video) => video.status !== 'completed')
         if (!pendingVideos.length) {
           await this.loadNextAutomaticBatch()
           if (this.state !== 'running') return
           if (!this.videos.length) {
-            this.state = 'completed'
-            this.currentVideoId = undefined
-            this.hasMore = false
-            this.account = { ...this.account, likesCount: 0 }
-            this.message = 'All liked videos have been removed.'
-            this.publishAccountSnapshot()
-            this.publishSnapshot()
+            this.completeAutomaticTask(true)
             return
           }
           continue
@@ -482,6 +501,10 @@ export class DouyinTaskService {
 
         for (const video of pendingVideos) {
           if (this.state !== 'running') return
+          if (this.taskMode && this.taskMode !== 'selected' && hasReachedAutomaticTarget(this.taskMode, this.taskCompleted, this.taskTotal)) {
+            this.completeAutomaticTask(false)
+            return
+          }
 
           this.currentVideoId = video.id
           video.status = 'processing'
@@ -511,6 +534,10 @@ export class DouyinTaskService {
 
           this.currentVideoId = undefined
           this.publishSnapshot()
+          if (this.taskMode && this.taskMode !== 'selected' && hasReachedAutomaticTarget(this.taskMode, this.taskCompleted, this.taskTotal)) {
+            this.completeAutomaticTask(false)
+            return
+          }
           await sleep(180 + Math.round(Math.random() * 140))
         }
       }
@@ -525,6 +552,7 @@ export class DouyinTaskService {
 
   private async loadNextAutomaticBatch() {
     this.message = 'Loading the next batch of liked videos.'
+    this.replacementVideos = []
 
     // Start at the first page after each mutation because later videos shift forward as likes are removed.
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -546,10 +574,55 @@ export class DouyinTaskService {
     throw new Error('Douyin still reports liked videos but did not return a new batch. Continue to retry.')
   }
 
+  private completeAutomaticTask(exhausted: boolean) {
+    const mode = this.taskMode
+    this.state = 'completed'
+    this.currentVideoId = undefined
+    if (mode === 'limited') {
+      if (exhausted && this.taskCompleted < this.taskTotal) this.taskTotal = this.taskCompleted
+      this.message = `Removed ${this.taskCompleted} liked videos.`
+    } else {
+      this.hasMore = false
+      this.account = { ...this.account, likesCount: 0 }
+      this.message = 'All liked videos have been removed.'
+      this.publishAccountSnapshot()
+    }
+    this.publishSnapshot()
+  }
+
+  private appendReplacementVideos(limit: number) {
+    const knownIds = new Set(this.videos.map((video) => video.id))
+    let appended = 0
+    while (this.replacementVideos.length && appended < limit) {
+      const video = this.replacementVideos.shift()
+      if (!video || knownIds.has(video.id)) continue
+      this.videos.push(video)
+      knownIds.add(video.id)
+      appended += 1
+    }
+    return appended
+  }
+
+  private async loadReplacementVideo() {
+    if (this.appendReplacementVideos(1)) return
+
+    // Fetch one normal page into a private buffer, then reveal only one replacement per removal.
+    while (this.hasMore) {
+      const currentVideos = [...this.videos]
+      const currentIds = new Set(currentVideos.map((video) => video.id))
+      await this.loadNextPage()
+      const fetchedVideos = this.videos.filter((video) => !currentIds.has(video.id))
+      this.videos = currentVideos
+      this.replacementVideos.push(...fetchedVideos)
+      if (this.appendReplacementVideos(1)) return
+    }
+  }
+
   private resetTask() {
     this.taskMode = undefined
     this.taskIds = new Set()
     this.taskProcessedIds = new Set()
+    this.replacementVideos = []
     this.taskCompleted = 0
     this.taskTotal = 0
   }
@@ -832,7 +905,7 @@ export class DouyinTaskService {
         total: this.taskTotal,
       },
       currentVideoId: this.currentVideoId,
-      hasMore: this.hasMore,
+      hasMore: this.hasMore || this.replacementVideos.length > 0,
       isLoadingMore: this.isLoadingMore,
       message: this.message,
     }

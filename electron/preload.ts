@@ -12,7 +12,7 @@ contextBridge.exposeInMainWorld('ebb', {
     scan: () => ipcRenderer.invoke('douyin:scan'),
     loadMore: () => ipcRenderer.invoke('douyin:load-more'),
     start: (selectedIds: string[]) => ipcRenderer.invoke('douyin:start', selectedIds),
-    startAll: () => ipcRenderer.invoke('douyin:start-all'),
+    startAll: (limit?: number) => ipcRenderer.invoke('douyin:start-all', limit),
     pause: () => ipcRenderer.invoke('douyin:pause'),
     resume: (selectedIds: string[]) => ipcRenderer.invoke('douyin:resume', selectedIds),
     stop: () => ipcRenderer.invoke('douyin:stop'),

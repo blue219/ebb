@@ -1,6 +1,14 @@
-import { useEffect, useMemo, useRef, useState, type UIEvent, type WheelEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type UIEvent, type WheelEvent } from 'react'
 
 import { Button } from '@/components/ui/button'
+import {
+  DEFAULT_CLEAR_SCOPE,
+  clampClearLimit,
+  getClearTarget,
+  getScopeSelectedIds,
+  transitionToManualSelection,
+  type ClearScope,
+} from '@/lib/clear-scope'
 import { copy, type Locale } from '@/lib/i18n'
 
 const initialSnapshot: TaskSnapshot = {
@@ -21,11 +29,17 @@ const statusStyles: Record<VideoStatus, string> = {
   failed: 'text-red-600',
 }
 
-type IconName = 'check' | 'globe' | 'heart' | 'loader' | 'logout' | 'pause' | 'play' | 'refresh' | 'search' | 'shield' | 'stop' | 'warning' | 'x'
+type IconName = 'check' | 'chevron' | 'globe' | 'heart' | 'loader' | 'logout' | 'pause' | 'play' | 'refresh' | 'shield' | 'stop' | 'warning' | 'x'
+
+type PendingClear =
+  | { mode: 'all'; count: number }
+  | { mode: 'limited'; count: number }
+  | { mode: 'selected'; count: number; ids: string[] }
 
 function Icon({ name, className = '' }: { name: IconName; className?: string }) {
   const props = { className: `inline-block shrink-0 ${className}`, fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
   if (name === 'check') return <svg {...props}><path d="m5 12 4 4L19 6" /></svg>
+  if (name === 'chevron') return <svg {...props}><path d="m8 10 4 4 4-4" /></svg>
   if (name === 'globe') return <svg {...props}><circle cx="12" cy="12" r="8" /><path d="M4 12h16M12 4c2.2 2.2 3.2 5 3.2 8S14.2 17.8 12 20c-2.2-2.2-3.2-5-3.2-8S9.8 6.2 12 4" /></svg>
   if (name === 'heart') return <svg {...props}><path d="M20.8 8.6c0 5.2-8.8 10.2-8.8 10.2S3.2 13.8 3.2 8.6A4.6 4.6 0 0 1 12 6.7a4.6 4.6 0 0 1 8.8 1.9ZM4 4l16 16" /></svg>
   if (name === 'loader') return <svg {...props}><path d="M20 12a8 8 0 1 1-2.3-5.7" /></svg>
@@ -33,7 +47,6 @@ function Icon({ name, className = '' }: { name: IconName; className?: string }) 
   if (name === 'pause') return <svg {...props}><circle cx="12" cy="12" r="8" /><path d="M10 9v6M14 9v6" /></svg>
   if (name === 'play') return <svg {...props}><circle cx="12" cy="12" r="8" /><path d="m10 9 5 3-5 3Z" /></svg>
   if (name === 'refresh') return <svg {...props}><path d="M20 7v5h-5M4 17v-5h5" /><path d="M18.1 9A7 7 0 0 0 6.7 6.7L4 9M5.9 15A7 7 0 0 0 17.3 17.3L20 15" /></svg>
-  if (name === 'search') return <svg {...props}><circle cx="10.5" cy="10.5" r="5.5" /><path d="m15 15 4 4" /></svg>
   if (name === 'shield') return <svg {...props}><path d="M12 3 19 6v5c0 4.6-3 7.8-7 10-4-2.2-7-5.4-7-10V6l7-3Z" /><path d="m8.7 12 2.1 2.1 4.5-4.4" /></svg>
   if (name === 'stop') return <svg {...props}><circle cx="12" cy="12" r="8" /><path d="M9 9h6v6H9z" /></svg>
   if (name === 'warning') return <svg {...props}><path d="m12 4 8 15H4L12 4Z" /><path d="M12 9v4M12 16h.01" /></svg>
@@ -46,9 +59,11 @@ function App() {
   const [account, setAccount] = useState<AccountSnapshot>({ state: 'checking' })
   const [login, setLogin] = useState<LoginSnapshot>({ state: 'idle' })
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  const [query, setQuery] = useState('')
-  const [selectedOnly, setSelectedOnly] = useState(false)
-  const [confirmMode, setConfirmMode] = useState<TaskMode>()
+  const [clearScope, setClearScope] = useState<ClearScope>(DEFAULT_CLEAR_SCOPE)
+  const [scopeInput, setScopeInput] = useState('All')
+  const [scopeMenuOpen, setScopeMenuOpen] = useState(false)
+  const [pendingClear, setPendingClear] = useState<PendingClear>()
+  const [completedControlDismissed, setCompletedControlDismissed] = useState(false)
   // This boolean contains no credentials; it only prevents a sign-in flash during session restoration.
   const [loginOpen, setLoginOpen] = useState(() => localStorage.getItem(SAVED_DOUYIN_SESSION_KEY) !== 'true')
   const [busy, setBusy] = useState(false)
@@ -56,6 +71,8 @@ function App() {
   const loadMorePendingRef = useRef(false)
   const loadMoreArmedRef = useRef(true)
   const autoScanStartedRef = useRef(false)
+  const videoScrollRef = useRef<HTMLDivElement>(null)
+  const scopeControlRef = useRef<HTMLDivElement>(null)
   const completedDismissTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
   const t = copy[locale]
 
@@ -87,15 +104,24 @@ function App() {
     }
   }, [loginOpen])
 
-  const visibleVideos = useMemo(() => snapshot.videos.filter((video) => {
-    const matchesQuery = video.title.toLocaleLowerCase().includes(query.toLocaleLowerCase())
-    return !dismissedVideoIds.has(video.id) && matchesQuery && (!selectedOnly || selectedIds.has(video.id))
-  }), [dismissedVideoIds, query, selectedIds, selectedOnly, snapshot.videos])
+  const visibleVideos = useMemo(() => snapshot.videos.filter((video) => !dismissedVideoIds.has(video.id)), [dismissedVideoIds, snapshot.videos])
 
-  const selectedCount = selectedIds.size
-  const activeCount = snapshot.videos.filter((video) => selectedIds.has(video.id)).length
+  const manualIdsForRemoval = useMemo(() => snapshot.videos
+    .filter((video) => selectedIds.has(video.id) && video.status !== 'completed')
+    .map((video) => video.id), [selectedIds, snapshot.videos])
+  const loadedPendingCount = snapshot.videos.filter((video) => video.status !== 'completed').length
+  const totalLikes = Math.max(0, account.likesCount ?? loadedPendingCount)
+  const effectiveSelectedIds = useMemo(
+    () => getScopeSelectedIds(clearScope, visibleVideos, selectedIds),
+    [clearScope, selectedIds, visibleVideos],
+  )
+  const clearTarget = getClearTarget(clearScope, totalLikes, manualIdsForRemoval.length)
   const isTaskActive = snapshot.state === 'running' || snapshot.state === 'scanning' || snapshot.isLoadingMore
-  const isRemovalControlVisible = snapshot.progress.total > 0 && ['running', 'paused', 'completed'].includes(snapshot.state)
+  const isTaskLocked = isTaskActive || snapshot.state === 'paused'
+  const isRemovalControlVisible = snapshot.progress.total > 0
+    && ['running', 'paused', 'completed'].includes(snapshot.state)
+    && (snapshot.state !== 'completed' || !completedControlDismissed)
+  const activeCount = isRemovalControlVisible ? snapshot.progress.total : clearTarget
   const completedInCurrentRun = Math.min(snapshot.progress.total, snapshot.progress.completed)
   const removalPercent = snapshot.progress.total ? Math.round((completedInCurrentRun / snapshot.progress.total) * 100) : 0
   const isSignedIn = account.state === 'signedIn'
@@ -121,6 +147,9 @@ function App() {
     for (const timeout of completedDismissTimersRef.current.values()) clearTimeout(timeout)
     completedDismissTimersRef.current.clear()
     setSelectedIds(new Set())
+    setClearScope(DEFAULT_CLEAR_SCOPE)
+    setScopeInput(t.all)
+    setScopeMenuOpen(false)
     setDismissedVideoIds(new Set())
     void run(() => window.ebb.douyin.scan())
   }
@@ -131,18 +160,30 @@ function App() {
   }
 
   const startRemoval = () => {
-    const mode = confirmMode
-    const ids = [...selectedIds]
-    setConfirmMode(undefined)
-    if (mode === 'all') void run(() => window.ebb.douyin.startAll())
-    else if (mode === 'selected') void run(() => window.ebb.douyin.start(ids))
+    const request = pendingClear
+    setPendingClear(undefined)
+    if (request?.mode === 'all') void run(() => window.ebb.douyin.startAll())
+    else if (request?.mode === 'limited') void run(() => window.ebb.douyin.startAll(request.count))
+    else if (request?.mode === 'selected') void run(() => window.ebb.douyin.start(request.ids))
   }
 
-  const toggleRemovalPause = () => {
+  const resetClearScope = () => {
+    setClearScope(DEFAULT_CLEAR_SCOPE)
+    setScopeInput(t.all)
+    setSelectedIds(new Set())
+    setScopeMenuOpen(false)
+    if (snapshot.state === 'completed') setCompletedControlDismissed(true)
+  }
+
+  const handleRemovalControl = () => {
+    if (snapshot.state === 'completed') {
+      resetClearScope()
+      return
+    }
     if (snapshot.state === 'running') {
       void run(() => window.ebb.douyin.pause())
-    } else if (snapshot.state === 'paused' && (snapshot.mode === 'all' || selectedIds.size)) {
-      void run(() => window.ebb.douyin.resume([...selectedIds]))
+    } else if (snapshot.state === 'paused' && (snapshot.mode !== 'selected' || manualIdsForRemoval.length)) {
+      void run(() => window.ebb.douyin.resume(manualIdsForRemoval))
     }
   }
 
@@ -183,6 +224,23 @@ function App() {
   }, [snapshot.state])
 
   useEffect(() => {
+    if (snapshot.state !== 'completed') setCompletedControlDismissed(false)
+  }, [snapshot.state])
+
+  useEffect(() => {
+    if (clearScope.kind === 'all') setScopeInput(t.all)
+    else if (clearScope.kind === 'manual') setScopeInput(t.custom)
+  }, [clearScope.kind, t.all, t.custom])
+
+  useEffect(() => {
+    const closeScopeMenu = (event: PointerEvent) => {
+      if (!scopeControlRef.current?.contains(event.target as Node)) setScopeMenuOpen(false)
+    }
+    document.addEventListener('pointerdown', closeScopeMenu)
+    return () => document.removeEventListener('pointerdown', closeScopeMenu)
+  }, [])
+
+  useEffect(() => {
     for (const video of snapshot.videos) {
       if (video.status !== 'completed' || dismissedVideoIds.has(video.id) || completedDismissTimersRef.current.has(video.id)) continue
       const timeout = setTimeout(() => dismissCompletedVideo(video.id), 360)
@@ -195,14 +253,15 @@ function App() {
     completedDismissTimersRef.current.clear()
   }, [])
 
-  const requestNextPageNearBottom = (container: HTMLDivElement, allowAtTop = false) => {
+  const requestNextPageNearBottom = useCallback((container: HTMLDivElement, allowAtTop = false) => {
     const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
-    if (distanceFromBottom > 120) {
+    const prefetchDistance = Math.max(320, container.clientHeight / 2)
+    if (distanceFromBottom > prefetchDistance) {
       loadMoreArmedRef.current = true
       return
     }
     if ((!allowAtTop && container.scrollTop <= 0) || !loadMoreArmedRef.current || loadMorePendingRef.current) return
-    if (!snapshot.hasMore || snapshot.isLoadingMore || snapshot.state !== 'ready') return
+    if (!snapshot.hasMore || snapshot.isLoadingMore || !['ready', 'completed', 'stopped'].includes(snapshot.state)) return
 
     // Require another user scroll toward the new bottom before requesting the following page.
     loadMoreArmedRef.current = false
@@ -210,7 +269,7 @@ function App() {
     void window.ebb.douyin.loadMore().finally(() => {
       loadMorePendingRef.current = false
     })
-  }
+  }, [snapshot.hasMore, snapshot.isLoadingMore, snapshot.state])
 
   const handleVideoScroll = (event: UIEvent<HTMLDivElement>) => {
     requestNextPageNearBottom(event.currentTarget)
@@ -220,25 +279,44 @@ function App() {
     if (event.deltaY > 0) requestNextPageNearBottom(event.currentTarget, true)
   }
 
-  const toggleVideo = (id: string) => {
-    setSelectedIds((current) => {
-      const next = new Set(current)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
+  useEffect(() => {
+    const container = videoScrollRef.current
+    if (container) requestNextPageNearBottom(container, true)
+  }, [requestNextPageNearBottom, visibleVideos.length])
+
+  const selectClearScope = (scope: ClearScope) => {
+    setClearScope(scope)
+    setScopeInput(scope.kind === 'all' ? t.all : scope.kind === 'manual' ? t.custom : String(scope.limit))
+    if (scope.kind !== 'manual') setSelectedIds(new Set())
+    setScopeMenuOpen(false)
+    if (snapshot.state === 'completed') setCompletedControlDismissed(true)
   }
 
-  const toggleVisible = () => {
-    setSelectedIds((current) => {
-      const next = new Set(current)
-      const allVisibleSelected = visibleVideos.length > 0 && visibleVideos.every((video) => next.has(video.id))
-      for (const video of visibleVideos) {
-        if (allVisibleSelected) next.delete(video.id)
-        else next.add(video.id)
-      }
-      return next
-    })
+  const commitScopeInput = () => {
+    const parsed = Number(scopeInput)
+    if (!scopeInput.trim() || !Number.isFinite(parsed)) {
+      setScopeInput(clearScope.kind === 'all' ? t.all : clearScope.kind === 'manual' ? t.custom : String(clearScope.limit))
+      return
+    }
+    const limit = clampClearLimit(parsed, totalLikes)
+    if (limit > 0) selectClearScope({ kind: 'limit', limit })
+    else setScopeInput(t.all)
+  }
+
+  const toggleVideo = (id: string) => {
+    // The first row interaction promotes generated All/limit checks into an explicit manual selection.
+    setSelectedIds((current) => transitionToManualSelection(clearScope, visibleVideos, current, id))
+    setClearScope({ kind: 'manual' })
+    setScopeInput(t.custom)
+    setScopeMenuOpen(false)
+    if (snapshot.state === 'completed') setCompletedControlDismissed(true)
+  }
+
+  const prepareClear = () => {
+    if (clearTarget <= 0) return
+    if (clearScope.kind === 'all') setPendingClear({ mode: 'all', count: clearTarget })
+    else if (clearScope.kind === 'limit') setPendingClear({ mode: 'limited', count: clearTarget })
+    else setPendingClear({ mode: 'selected', count: manualIdsForRemoval.length, ids: [...manualIdsForRemoval] })
   }
 
   const statusLabel = (status: VideoStatus) => ({
@@ -247,6 +325,17 @@ function App() {
     completed: t.statusCompleted,
     failed: t.statusFailed,
   })[status]
+
+  const formatCount = (count: number) => count.toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US')
+  const clearButtonLabel = t.clearLikes.replace('{count}', formatCount(clearTarget))
+  const pendingClearTitle = pendingClear ? t.confirmClearTitle.replace('{count}', formatCount(pendingClear.count)) : ''
+  const pendingClearBody = pendingClear
+    ? (pendingClear.mode === 'all'
+        ? t.confirmAllBody
+        : pendingClear.mode === 'limited'
+          ? t.confirmLimitBody.replace('{count}', formatCount(pendingClear.count))
+          : t.confirmManualBody.replace('{count}', formatCount(pendingClear.count)))
+    : ''
 
   return (
     <main className="h-svh overflow-hidden bg-[#f4f5f7] p-2 text-zinc-950 sm:p-3">
@@ -268,7 +357,7 @@ function App() {
               ? <img className="size-11 shrink-0 rounded-full border border-white object-cover shadow-sm" src={account.avatar} alt="" />
               : <div className="flex size-11 shrink-0 items-center justify-center rounded-full bg-zinc-100"><Icon name={account.state === 'checking' ? 'loader' : 'heart'} className={`size-5 text-zinc-500 ${account.state === 'checking' ? 'animate-spin' : ''}`} /></div>}
             <div className="min-w-0 flex-1">
-              <p className="text-[11px] font-medium text-zinc-500">{isSignedIn ? t.signedInAs : 'Douyin'}</p>
+              {!isSignedIn && <p className="text-[11px] font-medium text-zinc-500">Douyin</p>}
               <h2 className="truncate text-sm font-semibold tracking-[-0.015em]">{account.state === 'checking' ? t.checkingLogin : account.name ?? t.notSignedIn}</h2>
               {isSignedIn && <p className="mt-0.5 text-xs text-zinc-500">{likesDisplay} {t.likes}</p>}
             </div>
@@ -303,7 +392,7 @@ function App() {
         <section className="table-surface flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-zinc-200/75 px-3 py-2.5 sm:px-4">
               {isRemovalControlVisible
-                ? <button type="button" className="removal-progress group" data-complete={snapshot.state === 'completed'} aria-label={snapshot.state === 'completed' ? t.taskStates.completed : snapshot.state === 'paused' ? t.continue : t.pause} title={snapshot.state === 'completed' ? t.taskStates.completed : snapshot.state === 'paused' ? t.continue : t.pause} disabled={busy || snapshot.state === 'completed' || (snapshot.state === 'paused' && snapshot.mode !== 'all' && !selectedCount)} onClick={toggleRemovalPause}>
+                ? <button type="button" className="removal-progress group" data-complete={snapshot.state === 'completed'} aria-label={snapshot.state === 'completed' ? t.reset : snapshot.state === 'paused' ? t.continue : t.pause} title={snapshot.state === 'completed' ? t.reset : snapshot.state === 'paused' ? t.continue : t.pause} disabled={busy || (snapshot.state === 'paused' && snapshot.mode === 'selected' && !manualIdsForRemoval.length)} onClick={handleRemovalControl}>
                     <span className="removal-progress-fill" style={{ width: `${removalPercent}%` }} />
                     {snapshot.state === 'completed'
                       ? <span className="removal-progress-action"><Icon name="check" className="size-4" /> 100%</span>
@@ -311,37 +400,67 @@ function App() {
                       ? <span className="removal-progress-action"><Icon name="play" className="size-4" /> {t.continue}</span>
                       : <><span className="removal-progress-label">{t.removing} {completedInCurrentRun}/{snapshot.progress.total}</span><span className="removal-progress-action removal-progress-hover"><Icon name="pause" className="size-4" /></span></>}
                   </button>
-                : <Button variant="destructive" className="h-9 rounded-xl bg-red-600 px-3 text-xs text-white shadow-[0_5px_14px_rgba(220,38,38,0.18)] hover:bg-red-700" disabled={!isSignedIn || isTaskActive || busy || (account.likesCount === 0 && snapshot.videos.length === 0)} onClick={() => setConfirmMode('all')}><Icon name="heart" className="size-4" /> {t.removeAll}</Button>}
+                : <Button variant="destructive" className="h-9 rounded-xl bg-red-600 px-3 text-xs text-white shadow-[0_5px_14px_rgba(220,38,38,0.18)] hover:bg-red-700" disabled={!isSignedIn || isTaskLocked || busy || clearTarget <= 0} onClick={prepareClear}><Icon name="heart" className="size-4" /> {clearButtonLabel}</Button>}
               <Button variant="outline" className="h-9 rounded-xl border-zinc-200 bg-white/65 px-2.5 text-xs text-zinc-700 shadow-none" disabled={!['running', 'paused'].includes(snapshot.state) || busy} onClick={() => run(() => window.ebb.douyin.stop())}><Icon name="stop" className="size-4" /> {t.stop}</Button>
-              <Button variant="outline" aria-label={t.refreshList} title={t.refreshList} className="size-9 rounded-xl border-zinc-200 bg-white/60 p-0 text-zinc-700 shadow-none" disabled={!isSignedIn || busy || snapshot.state === 'running' || snapshot.state === 'paused' || snapshot.state === 'scanning' || snapshot.isLoadingMore} onClick={refreshVideos}>
-                <Icon name="refresh" className={`size-4 ${snapshot.state === 'scanning' ? 'animate-spin' : ''}`} />
+              <div ref={scopeControlRef} className="clear-scope-control">
+                <div className="clear-scope-field" data-open={scopeMenuOpen}>
+                  <input
+                    aria-label={t.clearAmount}
+                    aria-controls="clear-scope-menu"
+                    aria-expanded={scopeMenuOpen}
+                    aria-haspopup="listbox"
+                    disabled={isTaskLocked || busy || !isSignedIn}
+                    inputMode="numeric"
+                    value={scopeInput}
+                    onBlur={commitScopeInput}
+                    onChange={(event) => setScopeInput(event.target.value.replace(/\D/g, ''))}
+                    onClick={(event) => {
+                      setScopeMenuOpen(true)
+                      event.currentTarget.select()
+                    }}
+                    onFocus={(event) => {
+                      setScopeMenuOpen(true)
+                      event.currentTarget.select()
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        commitScopeInput()
+                        event.currentTarget.blur()
+                      } else if (event.key === 'Escape') {
+                        setScopeMenuOpen(false)
+                        event.currentTarget.blur()
+                      }
+                    }}
+                  />
+                  <button type="button" aria-label={t.quickSelect} disabled={isTaskLocked || busy || !isSignedIn} onMouseDown={(event) => event.preventDefault()} onClick={() => setScopeMenuOpen((current) => !current)}>
+                    <Icon name="chevron" className={`size-4 transition-transform ${scopeMenuOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                </div>
+                {scopeMenuOpen && <div id="clear-scope-menu" className="clear-scope-menu" role="listbox" aria-label={t.quickSelect}>
+                  <p>{t.quickSelect}</p>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    <button type="button" role="option" aria-selected={clearScope.kind === 'all'} data-selected={clearScope.kind === 'all'} onMouseDown={(event) => event.preventDefault()} onClick={() => selectClearScope(DEFAULT_CLEAR_SCOPE)}>{t.all}</button>
+                    {[10, 50, 100].map((amount) => <button type="button" role="option" aria-selected={clearScope.kind === 'limit' && clearScope.limit === amount} data-selected={clearScope.kind === 'limit' && clearScope.limit === amount} disabled={amount > totalLikes} key={amount} onMouseDown={(event) => event.preventDefault()} onClick={() => selectClearScope({ kind: 'limit', limit: amount })}>{amount}</button>)}
+                  </div>
+                  <span>{t.amountHint.replace('{count}', formatCount(totalLikes))}</span>
+                </div>}
+              </div>
+              {clearScope.kind !== 'all' && <Button variant="outline" className="h-9 rounded-xl border-zinc-200 bg-white/60 px-2.5 text-xs text-zinc-600 shadow-none" disabled={isTaskLocked} onClick={resetClearScope}><Icon name="x" className="size-4" /> {t.reset}</Button>}
+              <Button variant="outline" aria-label={t.refreshList} title={t.refreshList} className="ml-auto size-9 rounded-xl border-zinc-200 bg-white/60 p-0 text-zinc-700 shadow-none" disabled={!isSignedIn || busy || snapshot.state === 'running' || snapshot.state === 'paused' || snapshot.state === 'scanning' || snapshot.isLoadingMore} onClick={refreshVideos}>
+                <Icon name="refresh" className={`size-5 ${snapshot.state === 'scanning' ? 'animate-spin' : ''}`} />
               </Button>
-              <Button variant="outline" className="h-9 rounded-xl border-zinc-200 bg-white/60 px-2.5 text-xs text-zinc-700 shadow-none" disabled={!visibleVideos.length || isTaskActive} onClick={toggleVisible}>
-                <span className="checkmark" data-checked={visibleVideos.length > 0 && visibleVideos.every((video) => selectedIds.has(video.id))} />
-                {t.selectAll}
-              </Button>
-              {selectedCount > 0 && <Button variant="outline" className="h-9 rounded-xl border-zinc-200 bg-white/60 px-2.5 text-xs text-zinc-600 shadow-none" disabled={isTaskActive} onClick={() => setSelectedIds(new Set())}><Icon name="x" className="size-4" /> {t.clear}</Button>}
-              {selectedCount > 0 && !isRemovalControlVisible && <Button variant="outline" className="h-9 rounded-xl border-red-200 bg-red-50/70 px-3 text-xs text-red-700 shadow-none hover:bg-red-100/80" disabled={isTaskActive || busy} onClick={() => setConfirmMode('selected')}><Icon name="heart" className="size-4" /> {t.remove} ({selectedCount})</Button>}
-              <label className="search-field">
-                <Icon name="search" className="size-4" />
-                <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t.search} />
-              </label>
-              <label className="flex cursor-pointer items-center gap-2 px-1 text-sm text-zinc-600">
-                <input className="sr-only" type="checkbox" checked={selectedOnly} onChange={(event) => setSelectedOnly(event.target.checked)} />
-                <span className="switch" data-checked={selectedOnly}><span /></span>
-                {t.selectedOnly}
-              </label>
           </div>
 
-          {visibleVideos.length ? <div className="table-scroll min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto" onScroll={handleVideoScroll} onWheel={handleVideoWheel}>
+          {visibleVideos.length ? <div ref={videoScrollRef} className="table-scroll min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto" onScroll={handleVideoScroll} onWheel={handleVideoWheel}>
             <table className="w-full table-fixed text-left text-sm">
-              <colgroup><col className="w-11 sm:w-14" /><col /><col className="w-20 sm:w-28" /></colgroup>
+              <colgroup><col className="w-11 sm:w-14" /><col className="w-8 sm:w-10" /><col /><col className="w-20 sm:w-28" /></colgroup>
               <thead className="sticky top-0 z-10 bg-white/92 text-[11px] font-medium tracking-[0.02em] text-zinc-500 backdrop-blur-xl">
-                <tr><th className="px-3 py-2.5 sm:px-5" /><th className="px-2 py-2.5 sm:px-3">{t.title}</th><th className="px-2 py-2.5 sm:px-3">{t.status}</th></tr>
+                <tr><th className="px-3 py-2.5 sm:px-5" /><th className="px-1 py-2.5 text-center">#</th><th className="px-2 py-2.5 sm:px-3">{t.title}</th><th className="px-2 py-2.5 sm:px-3">{t.status}</th></tr>
               </thead>
               <tbody>
-                {visibleVideos.map((video) => <tr className={`border-t border-zinc-100/90 transition-colors hover:bg-zinc-50/80 ${selectedIds.has(video.id) ? 'bg-blue-50/65 hover:bg-blue-50/80' : ''} ${video.status === 'completed' ? 'video-row-removing' : ''}`} key={video.id} onAnimationEnd={() => video.status === 'completed' && dismissCompletedVideo(video.id)}>
-                  <td className="px-3 py-2 sm:px-5"><input aria-label={video.title} className="video-checkbox" type="checkbox" checked={selectedIds.has(video.id)} disabled={isTaskActive || video.status === 'completed'} onChange={() => toggleVideo(video.id)} /></td>
+                {visibleVideos.map((video, index) => <tr className={`border-t border-zinc-100/90 transition-colors hover:bg-zinc-50/80 ${effectiveSelectedIds.has(video.id) ? 'bg-blue-50/65 hover:bg-blue-50/80' : ''} ${video.status === 'completed' ? 'video-row-removing' : ''}`} key={video.id} onAnimationEnd={() => video.status === 'completed' && dismissCompletedVideo(video.id)}>
+                  <td className="px-3 py-2 sm:px-5"><input aria-label={video.title} className="video-checkbox" type="checkbox" checked={effectiveSelectedIds.has(video.id)} disabled={isTaskLocked || video.status === 'completed'} onChange={() => toggleVideo(video.id)} /></td>
+                  <td className="px-1 py-2 text-center text-[11px] tabular-nums text-zinc-400">{index + 1}</td>
                   <td className="max-w-0 overflow-hidden px-2 py-2 sm:px-3"><div className="flex min-w-0 items-center gap-2 sm:gap-3">{video.thumbnail ? <img className="size-8 shrink-0 rounded-lg object-cover sm:size-10" src={video.thumbnail} alt="" /> : <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-zinc-100 sm:size-10"><Icon name="heart" className="size-4 text-zinc-400" /></div>}<span className="min-w-0 truncate text-[13px] font-medium text-zinc-800 sm:text-sm" title={video.title}>{video.title}</span></div></td>
                   <td className={`whitespace-nowrap px-2 py-2 text-xs font-medium sm:px-3 ${statusStyles[video.status]}`}>{video.status === 'processing' && <Icon name="loader" className="mr-1 size-3 animate-spin" />}{statusLabel(video.status)}</td>
                 </tr>)}
@@ -379,12 +498,12 @@ function App() {
         </section>
       </div>}
 
-      {confirmMode && <div className="fixed inset-0 z-50 grid place-items-center bg-black/20 p-4 backdrop-blur-sm" role="presentation">
-        <section aria-modal="true" role="dialog" className="w-full max-w-md rounded-[24px] border border-white/80 bg-white/95 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.2)]">
+      {pendingClear && <div className="fixed inset-0 z-50 grid place-items-center bg-black/20 p-4 backdrop-blur-sm" role="presentation">
+        <section aria-modal="true" role="dialog" aria-labelledby="confirm-clear-title" className="w-full max-w-md rounded-[24px] border border-white/80 bg-white/95 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.2)]">
           <Icon name="warning" className="size-6 text-red-600" />
-          <h2 className="mt-4 text-xl font-semibold tracking-[-0.035em]">{confirmMode === 'all' ? t.confirmAllTitle : t.confirmTitle}</h2>
-          <p className="mt-2 text-sm leading-5 text-zinc-600">{confirmMode === 'all' ? t.confirmAllBody : t.confirmBody}</p>
-          <div className="mt-6 flex justify-end gap-2"><Button variant="outline" className="rounded-xl border-zinc-200" onClick={() => setConfirmMode(undefined)}>{t.cancel}</Button><Button variant="destructive" className="rounded-xl bg-red-600 text-white hover:bg-red-700" onClick={startRemoval}>{confirmMode === 'all' ? t.confirmAll : t.confirm}</Button></div>
+          <h2 id="confirm-clear-title" className="mt-4 text-xl font-semibold tracking-[-0.035em]">{pendingClearTitle}</h2>
+          <p className="mt-2 text-sm leading-5 text-zinc-600">{pendingClearBody}</p>
+          <div className="mt-6 flex justify-end gap-2"><Button variant="outline" className="rounded-xl border-zinc-200" onClick={() => setPendingClear(undefined)}>{t.cancel}</Button><Button variant="destructive" className="rounded-xl bg-red-600 text-white hover:bg-red-700" onClick={startRemoval}>{t.confirmClear}</Button></div>
         </section>
       </div>}
     </main>

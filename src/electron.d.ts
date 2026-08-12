@@ -1,5 +1,5 @@
 type TaskState = 'idle' | 'scanning' | 'ready' | 'running' | 'paused' | 'completed' | 'stopped'
-type TaskMode = 'selected' | 'all'
+type TaskMode = 'selected' | 'limited' | 'all'
 type VideoStatus = 'pending' | 'processing' | 'completed' | 'failed'
 type AccountState = 'checking' | 'signedOut' | 'signedIn'
 type LoginState = 'idle' | 'loading' | 'ready' | 'verification' | 'error'
@@ -56,7 +56,7 @@ interface Window {
       scan: () => Promise<void>
       loadMore: () => Promise<void>
       start: (selectedIds: string[]) => Promise<void>
-      startAll: () => Promise<void>
+      startAll: (limit?: number) => Promise<void>
       pause: () => Promise<void>
       resume: (selectedIds: string[]) => Promise<void>
       stop: () => Promise<void>
