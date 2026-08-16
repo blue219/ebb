@@ -13,6 +13,7 @@ type TaskController = Pick<
   | 'hideLogin'
   | 'scan'
   | 'loadMore'
+  | 'refreshCompletedList'
   | 'start'
   | 'startAll'
   | 'pause'
@@ -32,6 +33,7 @@ export function registerDouyinIpcHandlers(ipc: Pick<IpcMain, 'handle'>, task: Ta
   ipc.handle(DOUYIN_IPC_CHANNELS.hideLogin, () => task.hideLogin())
   ipc.handle(DOUYIN_IPC_CHANNELS.scan, () => task.scan())
   ipc.handle(DOUYIN_IPC_CHANNELS.loadMore, () => task.loadMore())
+  ipc.handle(DOUYIN_IPC_CHANNELS.refreshCompletedList, () => task.refreshCompletedList())
   ipc.handle(DOUYIN_IPC_CHANNELS.start, (_event, selectedIds: string[]) => task.start(selectedIds))
   ipc.handle(DOUYIN_IPC_CHANNELS.startAll, (_event, limit?: number) => task.startAll(limit))
   ipc.handle(DOUYIN_IPC_CHANNELS.pause, () => task.pause())

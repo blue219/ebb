@@ -9,6 +9,7 @@ export const DOUYIN_IPC_CHANNELS = {
   hideLogin: 'douyin:hide-login',
   scan: 'douyin:scan',
   loadMore: 'douyin:load-more',
+  refreshCompletedList: 'douyin:refresh-completed-list',
   start: 'douyin:start',
   startAll: 'douyin:start-all',
   pause: 'douyin:pause',
@@ -46,6 +47,8 @@ export interface TaskSnapshot {
   currentVideoId?: string
   hasMore: boolean
   isLoadingMore: boolean
+  isRefreshingCompletedList: boolean
+  completionRefreshError?: string
   message?: string
 }
 
@@ -80,6 +83,7 @@ export interface DouyinBridge {
   hideLogin: () => Promise<void>
   scan: () => Promise<void>
   loadMore: () => Promise<void>
+  refreshCompletedList: () => Promise<void>
   start: (selectedIds: string[]) => Promise<void>
   startAll: (limit?: number) => Promise<void>
   pause: () => Promise<void>

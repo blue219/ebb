@@ -20,6 +20,7 @@ describe('Douyin main-process IPC handlers', () => {
       hideLogin: vi.fn(),
       scan: vi.fn(),
       loadMore: vi.fn(),
+      refreshCompletedList: vi.fn(),
       start: vi.fn(),
       startAll: vi.fn(),
       pause: vi.fn(),
@@ -40,6 +41,7 @@ describe('Douyin main-process IPC handlers', () => {
     await handlers.get(DOUYIN_IPC_CHANNELS.hideLogin)?.({})
     await handlers.get(DOUYIN_IPC_CHANNELS.scan)?.({})
     await handlers.get(DOUYIN_IPC_CHANNELS.loadMore)?.({})
+    await handlers.get(DOUYIN_IPC_CHANNELS.refreshCompletedList)?.({})
     await handlers.get(DOUYIN_IPC_CHANNELS.start)?.({}, ['1'])
     await handlers.get(DOUYIN_IPC_CHANNELS.startAll)?.({}, 10)
     await handlers.get(DOUYIN_IPC_CHANNELS.pause)?.({})
@@ -52,6 +54,7 @@ describe('Douyin main-process IPC handlers', () => {
     expect(task.hideLogin).toHaveBeenCalledOnce()
     expect(task.scan).toHaveBeenCalledOnce()
     expect(task.loadMore).toHaveBeenCalledOnce()
+    expect(task.refreshCompletedList).toHaveBeenCalledOnce()
     expect(task.start).toHaveBeenCalledWith(['1'])
     expect(task.startAll).toHaveBeenCalledWith(10)
     expect(task.pause).toHaveBeenCalledOnce()

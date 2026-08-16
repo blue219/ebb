@@ -25,7 +25,7 @@ The automated layers cover:
 
 - Clear-scope calculation and automatic-removal policy.
 - Navigation, QR-image, login-surface, and untrusted-response policy.
-- Account checks, pagination, deduplication, selected/limited/all removal, replacement rows, pause, continue, stop, rejected requests, stale counts, sign out, and workspace crashes.
+- Account checks, 30-row pagination, low-water prefetching, deduplication, selected/limited/all removal, replacement rows, completed-list refresh, pause, continue, stop, rejected requests, stale counts, sign out, and workspace crashes.
 - Preload command/event mapping and main-process IPC registration.
 - QR sign-in presentation, scope selection and confirmation, progress controls, error presentation, language switching, and load-more de-duplication.
 - Electron startup, preload availability, sandbox settings, offline removal flow, and injected failure behavior.
@@ -38,7 +38,7 @@ The Electron fixture uses `test-results/` for failure screenshots and traces. It
 
 1. Run `npm run verify`; do not continue unless every automated gate passes.
 2. Run `npm run dev` and sign in by QR code.
-3. Confirm that the account name, Likes count, and first 10 rows load.
+3. Confirm that the account name, Likes count, and first 30 rows load.
 4. Scroll near the end of the table and confirm another page loads when more likes exist.
 5. Select exactly one expendable video so the scope changes to **Custom**.
 6. Confirm that the displayed clear target is 1, start the task, and verify it reaches **Completed**.

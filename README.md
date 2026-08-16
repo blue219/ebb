@@ -7,7 +7,7 @@ Ebb is a development-stage Electron app for reviewing and bulk-removing liked vi
 ## Current status
 
 - Sign in to Douyin by QR code and restore that session on the same device.
-- Load liked videos in pages of 10.
+- Load liked videos in pages of 30. Automatic removal prefetches the next page when only 10 rows remain.
 - Remove an explicit manual selection, a fixed numeric limit, or all likes returned until the account is empty.
 - Pause, continue, or stop a removal task between API requests.
 - Use the interface in English or Chinese.
@@ -47,7 +47,7 @@ npm run dev
 ## Use Ebb
 
 1. Start Ebb. Signed-out users see the QR-code panel. Returning users restore the locally saved session; if it is no longer valid, Ebb asks them to sign in again.
-2. After the account name appears, Ebb loads the first 10 liked videos. Scroll toward the bottom of the table to load another page.
+2. After the account name appears, Ebb loads the first 30 liked videos. Scroll toward the bottom of the table to load another page.
 3. Choose a clear scope. The default is **All**; the menu also offers **10**, **50**, **100**, or any positive whole number up to the displayed Likes count. Clicking a row switches to **Custom** and keeps the other rows selected by the previous scope.
 4. Review **Clear N likes**, confirm the task, and use the progress control to pause or continue. **Stop** ends the current task without processing the remaining items.
 5. After a completed task, select the completed progress control or **Reset** to return to the default **All** scope.
@@ -55,7 +55,7 @@ npm run dev
 The modes have different boundaries:
 
 - **Custom** freezes the selected video IDs when the task starts.
-- A numeric limit freezes the target count when the task starts and loads only as many pages as needed.
+- A numeric limit freezes the target count when the task starts and prefetches up to 30 rows when the active queue falls to 10 rows. After completion, Ebb refreshes the table with remaining likes without changing the completed target.
 - **All** does not freeze a list of video IDs. It reloads from the first page after each batch and continues until Douyin returns no likes. Do not add new likes while an **All** task is running.
 
 Date-based scopes are intentionally unavailable because the current integration has not observed a stable timestamp for when the signed-in person liked each video. A video's publication time is not a substitute.

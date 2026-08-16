@@ -21,6 +21,7 @@ describe('Douyin preload bridge', () => {
     await bridge.hideLogin()
     await bridge.scan()
     await bridge.loadMore()
+    await bridge.refreshCompletedList()
     await bridge.start(['1'])
     await bridge.startAll(5)
     await bridge.pause()
@@ -35,6 +36,7 @@ describe('Douyin preload bridge', () => {
       [DOUYIN_IPC_CHANNELS.hideLogin],
       [DOUYIN_IPC_CHANNELS.scan],
       [DOUYIN_IPC_CHANNELS.loadMore],
+      [DOUYIN_IPC_CHANNELS.refreshCompletedList],
       [DOUYIN_IPC_CHANNELS.start, ['1']],
       [DOUYIN_IPC_CHANNELS.startAll, 5],
       [DOUYIN_IPC_CHANNELS.pause],

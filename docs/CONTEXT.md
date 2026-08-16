@@ -60,6 +60,10 @@ The account total reported by Douyin. It sets the initial total for **All** and 
 
 The liked-video rows currently held in memory. This is not necessarily the full account and must not be called “all likes.”
 
+**Prefetched videos**
+
+Liked-video rows kept privately in memory after a background page request. They are not yet visible or selectable, and become loaded videos only when the active queue needs them.
+
 **Completed**
 
 The unlike request for an item succeeded during the current app run. It does not mean the video was deleted from Douyin.

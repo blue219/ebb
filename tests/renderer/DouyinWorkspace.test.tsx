@@ -23,6 +23,7 @@ const readyTask = (overrides: Partial<TaskSnapshot> = {}): TaskSnapshot => ({
   progress: { completed: 0, total: 0 },
   hasMore: false,
   isLoadingMore: false,
+  isRefreshingCompletedList: false,
   ...overrides,
 })
 
@@ -37,6 +38,7 @@ function createBridge(initial: DouyinStateSnapshot) {
     hideLogin: vi.fn().mockResolvedValue(undefined),
     scan: vi.fn().mockResolvedValue(undefined),
     loadMore: vi.fn().mockResolvedValue(undefined),
+    refreshCompletedList: vi.fn().mockResolvedValue(undefined),
     start: vi.fn().mockResolvedValue(undefined),
     startAll: vi.fn().mockResolvedValue(undefined),
     pause: vi.fn().mockResolvedValue(undefined),
@@ -140,6 +142,31 @@ describe('Douyin workspace user flows', () => {
     harness.emitStatus({ ...running, state: 'completed', progress: { completed: 3, total: 3 } })
     await user.click(screen.getByRole('button', { name: 'Reset' }))
     expect(screen.getByRole('textbox', { name: 'Number of likes to clear' })).toHaveValue('All')
+  })
+
+  test('shows completed-list refresh progress and retries a failed refresh without resetting the task', async () => {
+    localStorage.setItem('ebb:saved-douyin-session', 'true')
+    const completed = readyTask({
+      state: 'completed',
+      mode: 'limited',
+      videos: [],
+      counts: { loaded: 0, selected: 0, completed: 3, failed: 0 },
+      progress: { completed: 3, total: 3 },
+      isRefreshingCompletedList: true,
+    })
+    const harness = createBridge({ task: completed, account: signedInAccount, login: { state: 'idle' } })
+    window.ebb = { platform: 'win32', douyin: harness.bridge }
+    const user = userEvent.setup()
+    render(<DouyinWorkspace />)
+
+    expect((await screen.findAllByText('Refreshing the remaining liked videos…')).length).toBeGreaterThan(0)
+    harness.emitStatus({ ...completed, isRefreshingCompletedList: false, completionRefreshError: 'refresh unavailable' })
+    expect(await screen.findByText('Could not refresh the remaining liked videos.')).toBeInTheDocument()
+
+    const scansBeforeRetry = vi.mocked(harness.bridge.scan).mock.calls.length
+    await user.click(screen.getByRole('button', { name: 'Retry refresh' }))
+    expect(harness.bridge.refreshCompletedList).toHaveBeenCalledOnce()
+    expect(harness.bridge.scan).toHaveBeenCalledTimes(scansBeforeRetry)
   })
 
   test('surfaces command failures and switches all visible copy to Chinese', async () => {

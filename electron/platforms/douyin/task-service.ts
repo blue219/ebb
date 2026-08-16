@@ -7,11 +7,12 @@ import type {
   TaskSnapshot,
   TaskState,
 } from '../../../shared/platforms/douyin/contracts.js'
-import { FAVORITES_PAGE_SIZE } from './policy.js'
+import { AUTOMATIC_PREFETCH_THRESHOLD, FAVORITES_PAGE_SIZE } from './policy.js'
 import type { DouyinClient } from './client.js'
 import {
   createAutomaticRemovalPlan,
   hasReachedAutomaticTarget,
+  remainingAutomaticTarget,
 } from '../../shared/removal-policy.js'
 
 type StatusPublisher = (snapshot: TaskSnapshot) => void
@@ -34,6 +35,8 @@ export class DouyinTaskService {
   private nextCursor = '0'
   private hasMore = false
   private isLoadingMore = false
+  private isRefreshingCompletedList = false
+  private completionRefreshError?: string
   private secUserId?: string
   private message?: string
   private isRunning = false
@@ -41,6 +44,8 @@ export class DouyinTaskService {
   private taskIds = new Set<string>()
   private taskProcessedIds = new Set<string>()
   private replacementVideos: DouyinVideo[] = []
+  private automaticPrefetch?: Promise<void>
+  private automaticPrefetchGeneration = 0
   private taskCompleted = 0
   private taskTotal = 0
   private readonly publish: StatusPublisher
@@ -128,7 +133,9 @@ export class DouyinTaskService {
     this.replacementVideos = []
     this.nextCursor = '0'
     this.hasMore = false
-    this.message = 'Loading the first 10 liked videos.'
+    this.isRefreshingCompletedList = false
+    this.completionRefreshError = undefined
+    this.message = `Loading the first ${FAVORITES_PAGE_SIZE} liked videos.`
     this.publishSnapshot()
 
     try {
@@ -146,7 +153,12 @@ export class DouyinTaskService {
   }
 
   async loadMore() {
-    if ((!this.hasMore && !this.replacementVideos.length) || this.isLoadingMore || !['ready', 'completed', 'stopped'].includes(this.state)) return
+    if (
+      (!this.hasMore && !this.replacementVideos.length)
+      || this.isLoadingMore
+      || this.isRefreshingCompletedList
+      || !['ready', 'completed', 'stopped'].includes(this.state)
+    ) return
     const previousState = this.state
     try {
       await this.ensureSignedIn()
@@ -157,6 +169,17 @@ export class DouyinTaskService {
       this.message = this.errorMessage(error)
     }
     this.publishSnapshot()
+  }
+
+  async refreshCompletedList() {
+    if (
+      this.state !== 'completed'
+      || !this.taskMode
+      || this.taskMode === 'selected'
+      || this.isRefreshingCompletedList
+      || this.isRunning
+    ) return
+    await this.refreshCompletedAutomaticList()
   }
 
   start(selectedIds: string[]) {
@@ -190,12 +213,14 @@ export class DouyinTaskService {
     this.taskMode = plan.mode
     this.taskIds = new Set()
     this.replacementVideos = []
+    this.completionRefreshError = undefined
     this.taskProcessedIds = new Set(this.videos.filter((video) => video.status === 'completed').map((video) => video.id))
     this.taskCompleted = 0
     this.taskTotal = plan.total
     for (const video of this.videos) {
       if (video.status !== 'completed') video.status = 'pending'
     }
+    this.capAutomaticPendingRows()
     this.state = 'running'
     this.message = plan.mode === 'all'
       ? 'Removing every liked video and loading new batches until none remain.'
@@ -245,6 +270,8 @@ export class DouyinTaskService {
 
   stop() {
     if (!['running', 'paused'].includes(this.state)) return
+    this.automaticPrefetchGeneration += 1
+    this.automaticPrefetch = undefined
     this.state = 'stopped'
     this.currentVideoId = undefined
     this.message = this.taskMode === 'selected'
@@ -262,6 +289,8 @@ export class DouyinTaskService {
     this.secUserId = undefined
     this.nextCursor = '0'
     this.hasMore = false
+    this.isRefreshingCompletedList = false
+    this.completionRefreshError = undefined
     this.publishAccountSnapshot()
     this.state = 'idle'
     this.resetTask()
@@ -329,16 +358,16 @@ export class DouyinTaskService {
       await this.ensureSignedIn()
       while (this.state === 'running') {
         if (this.taskMode && this.taskMode !== 'selected' && hasReachedAutomaticTarget(this.taskMode, this.taskCompleted, this.taskTotal)) {
-          this.completeAutomaticTask(false)
+          await this.completeAutomaticTask(false)
           return
         }
 
         const pendingVideos = this.videos.filter((video) => video.status !== 'completed')
         if (!pendingVideos.length) {
-          await this.loadNextAutomaticBatch()
+          await this.refillAutomaticQueue()
           if (this.state !== 'running') return
-          if (!this.videos.length) {
-            this.completeAutomaticTask(true)
+          if (!this.videos.some((video) => video.status !== 'completed')) {
+            await this.completeAutomaticTask(true)
             return
           }
           continue
@@ -374,8 +403,9 @@ export class DouyinTaskService {
 
           this.currentVideoId = undefined
           this.publishSnapshot()
+          this.requestAutomaticPrefetch()
           if (this.taskMode && this.taskMode !== 'selected' && hasReachedAutomaticTarget(this.taskMode, this.taskCompleted, this.taskTotal)) {
-            this.completeAutomaticTask(false)
+            await this.completeAutomaticTask(false)
             return
           }
           await this.wait(180 + Math.round(Math.random() * 140))
@@ -392,7 +422,6 @@ export class DouyinTaskService {
 
   private async loadNextAutomaticBatch() {
     this.message = 'Loading the next batch of liked videos.'
-    this.replacementVideos = []
 
     // Start at the first page after each mutation because later videos shift forward as likes are removed.
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -403,6 +432,8 @@ export class DouyinTaskService {
         await this.loadNextPage()
         this.videos = this.videos.filter((video) => !this.taskProcessedIds.has(video.id))
       } while (this.state === 'running' && !this.videos.length && this.hasMore)
+
+      this.capAutomaticPendingRows()
 
       if (this.videos.length || !this.account.likesCount || this.state !== 'running') {
         this.publishSnapshot()
@@ -421,7 +452,93 @@ export class DouyinTaskService {
     throw new Error('Douyin still reports liked videos but did not return a new batch. Continue to retry.')
   }
 
-  private completeAutomaticTask(exhausted: boolean) {
+  private async refillAutomaticQueue() {
+    this.appendAutomaticReplacementVideos()
+    if (this.videos.some((video) => video.status !== 'completed')) return
+
+    await this.waitForAutomaticPrefetch()
+    this.appendAutomaticReplacementVideos()
+    if (this.videos.some((video) => video.status !== 'completed')) return
+
+    await this.loadNextAutomaticBatch()
+  }
+
+  private requestAutomaticPrefetch() {
+    if (
+      this.automaticPrefetch
+      || this.state !== 'running'
+      || !this.taskMode
+      || this.taskMode === 'selected'
+      || !this.hasMore
+    ) return
+
+    const pendingCount = this.videos.filter((video) => video.status !== 'completed').length
+    const remaining = remainingAutomaticTarget(this.taskMode, this.taskCompleted, this.taskTotal)
+    if (pendingCount > AUTOMATIC_PREFETCH_THRESHOLD || remaining <= pendingCount) return
+
+    const generation = this.automaticPrefetchGeneration
+    const prefetch = this.prefetchAutomaticPage(generation)
+      .catch(() => {
+        // The foreground loader retries if the active queue drains before the next page arrives.
+      })
+    this.automaticPrefetch = prefetch
+    void prefetch.finally(() => {
+      if (this.automaticPrefetch === prefetch) this.automaticPrefetch = undefined
+    })
+  }
+
+  private async waitForAutomaticPrefetch() {
+    if (!this.automaticPrefetch) return
+    try {
+      await this.automaticPrefetch
+    } catch {
+      // Prefetch is opportunistic. The foreground loader performs the recoverable retry.
+    }
+  }
+
+  private async prefetchAutomaticPage(generation: number) {
+    const page = await this.loadFirstPage()
+    if (generation !== this.automaticPrefetchGeneration) return
+    this.hasMore = page.hasMore
+    this.bufferReplacementVideos(page.videos)
+    if (this.state === 'running') {
+      this.appendAutomaticReplacementVideos()
+      this.publishSnapshot()
+    }
+  }
+
+  private appendAutomaticReplacementVideos() {
+    if (!this.taskMode || this.taskMode === 'selected') return 0
+    const pendingCount = this.videos.filter((video) => video.status !== 'completed').length
+    const desiredCount = Math.min(
+      FAVORITES_PAGE_SIZE,
+      remainingAutomaticTarget(this.taskMode, this.taskCompleted, this.taskTotal),
+    )
+    return this.appendReplacementVideos(Math.max(0, desiredCount - pendingCount))
+  }
+
+  private capAutomaticPendingRows() {
+    if (!this.taskMode || this.taskMode === 'selected') return
+    const desiredCount = Math.min(
+      FAVORITES_PAGE_SIZE,
+      remainingAutomaticTarget(this.taskMode, this.taskCompleted, this.taskTotal),
+    )
+    let keptPending = 0
+    const retained: DouyinVideo[] = []
+    const overflow: DouyinVideo[] = []
+    for (const video of this.videos) {
+      if (video.status === 'completed' || keptPending < desiredCount) {
+        retained.push(video)
+        if (video.status !== 'completed') keptPending += 1
+      } else {
+        overflow.push(video)
+      }
+    }
+    this.videos = retained
+    this.bufferReplacementVideos(overflow)
+  }
+
+  private async completeAutomaticTask(exhausted: boolean) {
     const mode = this.taskMode
     this.state = 'completed'
     this.currentVideoId = undefined
@@ -430,11 +547,45 @@ export class DouyinTaskService {
       this.message = `Removed ${this.taskCompleted} liked videos.`
     } else {
       this.hasMore = false
-      this.account = { ...this.account, likesCount: 0 }
       this.message = 'All liked videos have been removed.'
-      this.publishAccountSnapshot()
     }
+    this.videos = []
     this.publishSnapshot()
+    await this.waitForAutomaticPrefetch()
+    await this.refreshCompletedAutomaticList()
+  }
+
+  private async refreshCompletedAutomaticList() {
+    this.isRefreshingCompletedList = true
+    this.completionRefreshError = undefined
+    this.videos = []
+    this.nextCursor = '0'
+    this.hasMore = false
+    this.publishSnapshot()
+
+    try {
+      await this.ensureSignedIn()
+      const mode = this.taskMode
+      if (mode === 'limited') this.appendReplacementVideos(FAVORITES_PAGE_SIZE)
+
+      // All scopes deliberately verify the empty result; limited scopes only request when the cache is short.
+      if (mode === 'all' || this.videos.length < FAVORITES_PAGE_SIZE) {
+        const page = await this.loadFirstPage()
+        this.hasMore = page.hasMore
+        this.nextCursor = page.nextCursor ?? '0'
+        this.bufferReplacementVideos(page.videos)
+        this.appendReplacementVideos(FAVORITES_PAGE_SIZE - this.videos.length)
+      }
+
+      this.message = mode === 'all'
+        ? 'All liked videos have been removed.'
+        : `Removed ${this.taskCompleted} liked videos.`
+    } catch (error) {
+      this.completionRefreshError = this.errorMessage(error)
+    } finally {
+      this.isRefreshingCompletedList = false
+      this.publishSnapshot()
+    }
   }
 
   private appendReplacementVideos(limit: number) {
@@ -448,6 +599,18 @@ export class DouyinTaskService {
       appended += 1
     }
     return appended
+  }
+
+  private bufferReplacementVideos(videos: DouyinVideo[]) {
+    const knownIds = new Set([
+      ...this.videos.map((video) => video.id),
+      ...this.replacementVideos.map((video) => video.id),
+    ])
+    for (const video of videos) {
+      if (this.taskProcessedIds.has(video.id) || knownIds.has(video.id)) continue
+      this.replacementVideos.push({ ...video, status: 'pending' })
+      knownIds.add(video.id)
+    }
   }
 
   private async loadReplacementVideo() {
@@ -466,10 +629,13 @@ export class DouyinTaskService {
   }
 
   private resetTask() {
+    this.automaticPrefetchGeneration += 1
+    this.automaticPrefetch = undefined
     this.taskMode = undefined
     this.taskIds = new Set()
     this.taskProcessedIds = new Set()
     this.replacementVideos = []
+    this.completionRefreshError = undefined
     this.taskCompleted = 0
     this.taskTotal = 0
   }
@@ -594,6 +760,11 @@ export class DouyinTaskService {
     }
   }
 
+  private async loadFirstPage() {
+    if (!this.secUserId) this.secUserId = (await this.client.getCurrentUser()).secUserId
+    return this.client.loadFavorites(this.secUserId, '0', FAVORITES_PAGE_SIZE)
+  }
+
   private createSnapshot(selectedIds = new Set<string>()): TaskSnapshot {
     let selected = 0
     let completed = 0
@@ -622,6 +793,8 @@ export class DouyinTaskService {
       currentVideoId: this.currentVideoId,
       hasMore: this.hasMore || this.replacementVideos.length > 0,
       isLoadingMore: this.isLoadingMore,
+      isRefreshingCompletedList: this.isRefreshingCompletedList,
+      completionRefreshError: this.completionRefreshError,
       message: this.message,
     }
   }

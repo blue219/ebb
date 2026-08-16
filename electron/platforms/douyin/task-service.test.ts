@@ -24,6 +24,7 @@ class MemoryDouyinClient implements DouyinClient {
   user: DouyinCurrentUser = { secUserId: 'account-1', name: 'Sky', likesCount: 8 }
   login: LoginSnapshot = { state: 'ready', qrCode: 'data:image/png;base64,aA==' }
   pages: Array<DouyinFavoritePage | Error> = []
+  favoriteRequests: Array<{ cursor: string, count: number }> = []
   unlikeAttempts: string[] = []
   unlikeFailures = new Map<string, number>()
   beforeUnlike?: (videoId: string) => Promise<void>
@@ -49,7 +50,8 @@ class MemoryDouyinClient implements DouyinClient {
     if (this.loginError) throw this.loginError
     return this.login
   }
-  async loadFavorites() {
+  async loadFavorites(_secUserId: string, cursor: string, count: number) {
+    this.favoriteRequests.push({ cursor, count })
     const response = this.pages.shift() ?? page([])
     if (response instanceof Error) throw response
     return response
@@ -150,6 +152,66 @@ describe('Douyin removal task module', () => {
     expect(service.getAccountSnapshot().likesCount).toBe(5)
   })
 
+  test('prefetches a 30-row first page at the low watermark without pausing removal', async () => {
+    const { client, service } = createService()
+    client.user.likesCount = 50
+    const initialIds = Array.from({ length: 30 }, (_, index) => String(index + 1))
+    const prefetchedIds = Array.from({ length: 30 }, (_, index) => String(index + 21))
+    client.pages.push(page(initialIds, '30', true), page(prefetchedIds, '30', true))
+
+    await service.initialize()
+    await service.scan()
+    client.beforeUnlike = async (id) => {
+      if (id === '21') expect(client.favoriteRequests).toHaveLength(2)
+    }
+
+    await service.startAll(35)
+    await expectTaskState(service, 'completed')
+
+    expect(client.unlikeAttempts).toEqual(Array.from({ length: 35 }, (_, index) => String(index + 1)))
+    expect(client.favoriteRequests.every((request) => request.count === 30)).toBe(true)
+    expect(client.favoriteRequests[1]).toEqual({ cursor: '0', count: 30 })
+    expect(service.getTaskSnapshot().videos.map((video) => video.id)).toEqual(Array.from({ length: 15 }, (_, index) => String(index + 36)))
+  })
+
+  test('keeps removing loaded rows when a background prefetch fails, then retries in the foreground', async () => {
+    const { client, service } = createService()
+    client.user.likesCount = 40
+    client.pages.push(
+      page(Array.from({ length: 30 }, (_, index) => String(index + 1)), '30', true),
+      new Error('prefetch unavailable'),
+      page(Array.from({ length: 10 }, (_, index) => String(index + 31))),
+    )
+
+    await service.initialize()
+    await service.scan()
+    await service.startAll(40)
+    await expectTaskState(service, 'completed')
+
+    expect(client.unlikeAttempts).toEqual(Array.from({ length: 40 }, (_, index) => String(index + 1)))
+    expect(service.getTaskSnapshot().counts.failed).toBe(0)
+  })
+
+  test('keeps a completed task complete when refreshing its remaining table rows fails', async () => {
+    const { client, service } = createService()
+    client.pages.push(page(['1']), new Error('refresh unavailable'), page(['2']))
+
+    await service.initialize()
+    await service.scan()
+    await service.startAll(1)
+    await vi.waitFor(() => expect(service.getTaskSnapshot().completionRefreshError).toBe('refresh unavailable'))
+
+    expect(service.getTaskSnapshot().state).toBe('completed')
+    await service.refreshCompletedList()
+
+    expect(service.getTaskSnapshot()).toMatchObject({
+      state: 'completed',
+      isRefreshingCompletedList: false,
+      completionRefreshError: undefined,
+    })
+    expect(service.getTaskSnapshot().videos.map((video) => video.id)).toEqual(['2'])
+  })
+
   test('completes an All scope only after the account is exhausted', async () => {
     const { client, service } = createService()
     client.user.likesCount = 2
@@ -163,6 +225,7 @@ describe('Douyin removal task module', () => {
     expect(client.unlikeAttempts).toEqual(['1', '2'])
     expect(service.getTaskSnapshot()).toMatchObject({ mode: 'all', hasMore: false, progress: { completed: 2, total: 2 } })
     expect(service.getAccountSnapshot().likesCount).toBe(0)
+    expect(client.favoriteRequests).toHaveLength(3)
   })
 
   test('shrinks a limited target when the account exhausts early', async () => {

@@ -31,6 +31,7 @@ let task: TaskSnapshot = {
   progress: { completed: 0, total: 0 },
   hasMore: false,
   isLoadingMore: false,
+  isRefreshingCompletedList: false,
 }
 
 const publishTask = () => mainWindow?.webContents.send(DOUYIN_IPC_CHANNELS.status, task)
@@ -70,6 +71,7 @@ registerDouyinIpcHandlers(ipcMain, {
   hideLogin() {},
   async scan() { publishTask() },
   async loadMore() {},
+  async refreshCompletedList() {},
   start(selectedIds: string[]) { beginTask('selected', selectedIds.length) },
   async startAll(limit?: number) { beginTask(limit === undefined ? 'all' : 'limited', limit ?? account.likesCount ?? 0) },
   pause() {

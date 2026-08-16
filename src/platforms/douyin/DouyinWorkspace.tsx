@@ -25,6 +25,7 @@ const initialSnapshot: TaskSnapshot = {
   progress: { completed: 0, total: 0 },
   hasMore: false,
   isLoadingMore: false,
+  isRefreshingCompletedList: false,
 }
 
 const SAVED_DOUYIN_SESSION_KEY = 'ebb:saved-douyin-session'
@@ -155,7 +156,7 @@ function DouyinWorkspace() {
     [clearScope, selectedIds, visibleVideos],
   )
   const clearTarget = getClearTarget(clearScope, totalLikes, manualIdsForRemoval.length)
-  const isTaskActive = snapshot.state === 'running' || snapshot.state === 'scanning' || snapshot.isLoadingMore
+  const isTaskActive = snapshot.state === 'running' || snapshot.state === 'scanning' || snapshot.isLoadingMore || snapshot.isRefreshingCompletedList
   const isTaskLocked = isTaskActive || snapshot.state === 'paused'
   const isRemovalControlVisible = snapshot.progress.total > 0
     && ['running', 'paused', 'completed'].includes(snapshot.state)
@@ -300,7 +301,7 @@ function DouyinWorkspace() {
       return
     }
     if ((!allowAtTop && container.scrollTop <= 0) || !loadMoreArmedRef.current || loadMorePendingRef.current) return
-    if (!snapshot.hasMore || snapshot.isLoadingMore || !['ready', 'completed', 'stopped'].includes(snapshot.state)) return
+    if (!snapshot.hasMore || snapshot.isLoadingMore || snapshot.isRefreshingCompletedList || !['ready', 'completed', 'stopped'].includes(snapshot.state)) return
 
     // Require another user scroll toward the new bottom before requesting the following page.
     loadMoreArmedRef.current = false
@@ -308,7 +309,7 @@ function DouyinWorkspace() {
     void window.ebb.douyin.loadMore().finally(() => {
       loadMorePendingRef.current = false
     })
-  }, [snapshot.hasMore, snapshot.isLoadingMore, snapshot.state])
+  }, [snapshot.hasMore, snapshot.isLoadingMore, snapshot.isRefreshingCompletedList, snapshot.state])
 
   const handleVideoScroll = (event: UIEvent<HTMLDivElement>) => {
     requestNextPageNearBottom(event.currentTarget)
@@ -486,7 +487,7 @@ function DouyinWorkspace() {
                 </div>}
               </div>
               {clearScope.kind !== 'all' && <Button variant="outline" className="h-9 rounded-xl border-zinc-200 bg-white/60 px-2.5 text-xs text-zinc-600 shadow-none" disabled={isTaskLocked} onClick={resetClearScope}><Icon name="x" className="size-4" /> {t.reset}</Button>}
-              <Button variant="outline" aria-label={t.refreshList} title={t.refreshList} className="ml-auto size-9 rounded-xl border-zinc-200 bg-white/60 p-0 text-zinc-700 shadow-none" disabled={!isSignedIn || busy || snapshot.state === 'running' || snapshot.state === 'paused' || snapshot.state === 'scanning' || snapshot.isLoadingMore} onClick={refreshVideos}>
+              <Button variant="outline" aria-label={t.refreshList} title={t.refreshList} className="ml-auto size-9 rounded-xl border-zinc-200 bg-white/60 p-0 text-zinc-700 shadow-none" disabled={!isSignedIn || busy || snapshot.state === 'running' || snapshot.state === 'paused' || snapshot.state === 'scanning' || snapshot.isLoadingMore || snapshot.isRefreshingCompletedList} onClick={refreshVideos}>
                 <Icon name="refresh" className={`size-5 ${snapshot.state === 'scanning' ? 'animate-spin' : ''}`} />
               </Button>
           </div>
@@ -513,9 +514,9 @@ function DouyinWorkspace() {
                 />)}
               </tbody>
             </table>
-          </div> : <div className="grid flex-1 place-items-center px-6 py-14 text-center"><div><div className="mx-auto flex size-11 items-center justify-center rounded-2xl bg-zinc-100"><Icon name="heart" className="size-5 text-zinc-500" /></div><h2 className="mt-4 text-base font-semibold">{t.emptyTitle}</h2><p className="mt-1 max-w-xs text-sm leading-5 text-zinc-500">{t.emptyBody}</p></div></div>}
+          </div> : snapshot.isRefreshingCompletedList ? <div className="grid flex-1 place-items-center px-6 py-14 text-center"><div><div className="mx-auto flex size-11 items-center justify-center rounded-2xl bg-zinc-100"><Icon name="loader" className="size-5 animate-spin text-zinc-500" /></div><h2 className="mt-4 text-base font-semibold">{t.refreshingCompletedList}</h2></div></div> : snapshot.completionRefreshError ? <div className="grid flex-1 place-items-center px-6 py-14 text-center"><div><div className="mx-auto flex size-11 items-center justify-center rounded-2xl bg-red-50"><Icon name="warning" className="size-5 text-red-600" /></div><h2 className="mt-4 text-base font-semibold">{t.refreshCompletedListFailed}</h2><p className="mt-1 max-w-xs text-sm leading-5 text-zinc-500">{snapshot.completionRefreshError}</p><Button variant="outline" className="mt-4 rounded-xl border-zinc-200 bg-white/70 text-xs" disabled={busy} onClick={() => run(() => window.ebb.douyin.refreshCompletedList())}><Icon name="refresh" className="size-4" /> {t.retryRefresh}</Button></div></div> : <div className="grid flex-1 place-items-center px-6 py-14 text-center"><div><div className="mx-auto flex size-11 items-center justify-center rounded-2xl bg-zinc-100"><Icon name="heart" className="size-5 text-zinc-500" /></div><h2 className="mt-4 text-base font-semibold">{t.emptyTitle}</h2><p className="mt-1 max-w-xs text-sm leading-5 text-zinc-500">{t.emptyBody}</p></div></div>}
           <div className="flex h-10 shrink-0 items-center border-t border-zinc-200/70 px-4 text-[11px] text-zinc-500">
-            {snapshot.isLoadingMore ? <span className="flex items-center gap-2"><Icon name="loader" className="size-3.5 animate-spin" /> {t.loadingMore}</span> : !snapshot.hasMore && <span className="flex items-center gap-2"><Icon name="check" className="size-3.5 text-emerald-600" /> {t.allLoaded}</span>}
+            {snapshot.isLoadingMore || snapshot.isRefreshingCompletedList ? <span className="flex items-center gap-2"><Icon name="loader" className="size-3.5 animate-spin" /> {snapshot.isRefreshingCompletedList ? t.refreshingCompletedList : t.loadingMore}</span> : !snapshot.hasMore && <span className="flex items-center gap-2"><Icon name="check" className="size-3.5 text-emerald-600" /> {t.allLoaded}</span>}
           </div>
         </section>
       </div>

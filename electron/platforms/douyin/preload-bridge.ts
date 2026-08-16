@@ -16,6 +16,7 @@ export function createDouyinBridge(ipcRenderer: IpcRenderer): DouyinBridge {
     hideLogin: () => ipcRenderer.invoke(DOUYIN_IPC_CHANNELS.hideLogin),
     scan: () => ipcRenderer.invoke(DOUYIN_IPC_CHANNELS.scan),
     loadMore: () => ipcRenderer.invoke(DOUYIN_IPC_CHANNELS.loadMore),
+    refreshCompletedList: () => ipcRenderer.invoke(DOUYIN_IPC_CHANNELS.refreshCompletedList),
     start: (selectedIds: string[]) => ipcRenderer.invoke(DOUYIN_IPC_CHANNELS.start, selectedIds),
     startAll: (limit?: number) => ipcRenderer.invoke(DOUYIN_IPC_CHANNELS.startAll, limit),
     pause: () => ipcRenderer.invoke(DOUYIN_IPC_CHANNELS.pause),
