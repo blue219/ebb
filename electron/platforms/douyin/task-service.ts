@@ -9,6 +9,7 @@ import type {
 } from '../../../shared/platforms/douyin/contracts.js'
 import { AUTOMATIC_PREFETCH_THRESHOLD, FAVORITES_PAGE_SIZE } from './policy.js'
 import type { DouyinClient } from './client.js'
+import { DouyinMutationCoordinator } from './mutation-coordinator.js'
 import {
   createAutomaticRemovalPlan,
   hasReachedAutomaticTarget,
@@ -53,6 +54,7 @@ export class DouyinTaskService {
   private readonly publishLogin: LoginPublisher
   private readonly client: DouyinClient
   private readonly wait: (milliseconds: number) => Promise<void>
+  private readonly mutationCoordinator: DouyinMutationCoordinator
   private account: AccountSnapshot = { state: 'checking' }
   private login: LoginSnapshot = { state: 'idle' }
 
@@ -62,12 +64,14 @@ export class DouyinTaskService {
     publishAccount: AccountPublisher,
     publishLogin: LoginPublisher,
     wait: (milliseconds: number) => Promise<void> = sleep,
+    mutationCoordinator: DouyinMutationCoordinator = new DouyinMutationCoordinator(),
   ) {
     this.client = client
     this.publish = publish
     this.publishAccount = publishAccount
     this.publishLogin = publishLogin
     this.wait = wait
+    this.mutationCoordinator = mutationCoordinator
   }
 
   async initialize() {
@@ -87,6 +91,18 @@ export class DouyinTaskService {
 
   getLoginSnapshot() {
     return { ...this.login }
+  }
+
+  async requireSignedInUserId() {
+    await this.ensureSignedIn()
+    if (!this.secUserId) this.secUserId = (await this.client.getCurrentUser()).secUserId
+    return this.secUserId
+  }
+
+  decrementFollowingCount() {
+    if (this.account.followingCount === undefined || this.account.followingCount <= 0) return
+    this.account = { ...this.account, followingCount: this.account.followingCount - 1 }
+    this.publishAccountSnapshot()
   }
 
   async showLogin() {
@@ -115,6 +131,7 @@ export class DouyinTaskService {
     this.hideLogin()
     this.stopCrashListener?.()
     this.stopCrashListener = undefined
+    this.mutationCoordinator.release('likes')
     this.client.dispose()
   }
 
@@ -123,6 +140,7 @@ export class DouyinTaskService {
     this.setLoginSnapshot({ state: 'error', message: 'The Douyin sign-in process stopped unexpectedly.' })
     this.account = { state: 'signedOut', message: 'The Douyin sign-in page stopped unexpectedly. Try again.' }
     this.publishAccountSnapshot()
+    this.mutationCoordinator.release('likes')
   }
 
   async scan() {
@@ -189,6 +207,7 @@ export class DouyinTaskService {
     const selected = new Set(selectedIds)
     const knownIds = new Set(this.videos.map((video) => video.id))
     if (selectedIds.some((id) => !knownIds.has(id))) throw new Error('The selection is no longer available. Scan again.')
+    this.mutationCoordinator.acquire('likes')
 
     this.taskMode = 'selected'
     this.taskIds = selected
@@ -210,6 +229,7 @@ export class DouyinTaskService {
 
     const pendingCount = this.videos.filter((video) => video.status !== 'completed').length
     const plan = createAutomaticRemovalPlan(limit, this.account.likesCount, pendingCount)
+    this.mutationCoordinator.acquire('likes')
     this.taskMode = plan.mode
     this.taskIds = new Set()
     this.replacementVideos = []
@@ -278,10 +298,12 @@ export class DouyinTaskService {
       ? 'Task stopped. Unprocessed videos remain selected.'
       : 'Automatic removal stopped. Liked videos remain.'
     this.publishSnapshot(this.taskMode === 'selected' ? this.taskIds : undefined)
+    if (!this.isRunning) this.mutationCoordinator.release('likes')
   }
 
   async signOut() {
     this.stop()
+    this.mutationCoordinator.release('likes')
     this.hideLogin()
     this.setLoginSnapshot({ state: 'idle' })
     await this.client.clearSession()
@@ -341,6 +363,7 @@ export class DouyinTaskService {
       if (this.state === 'running') {
         this.state = 'completed'
         this.message = 'The selected videos have been processed.'
+        this.mutationCoordinator.release('likes')
         this.publishSnapshot(selectedIds)
       }
     } catch (error) {
@@ -349,6 +372,7 @@ export class DouyinTaskService {
       this.publishSnapshot(selectedIds)
     } finally {
       this.isRunning = false
+      if (this.state === 'stopped') this.mutationCoordinator.release('likes')
     }
   }
 
@@ -417,6 +441,7 @@ export class DouyinTaskService {
       this.publishSnapshot()
     } finally {
       this.isRunning = false
+      if (this.state === 'stopped') this.mutationCoordinator.release('likes')
     }
   }
 
@@ -550,6 +575,7 @@ export class DouyinTaskService {
       this.message = 'All liked videos have been removed.'
     }
     this.videos = []
+    this.mutationCoordinator.release('likes')
     this.publishSnapshot()
     await this.waitForAutomaticPrefetch()
     await this.refreshCompletedAutomaticList()
@@ -652,7 +678,13 @@ export class DouyinTaskService {
       const user = await this.client.getCurrentUser()
       this.client.flushSession()
       this.secUserId = user.secUserId
-      this.account = { state: 'signedIn', name: user.name, avatar: user.avatar, likesCount: user.likesCount }
+      this.account = {
+        state: 'signedIn',
+        name: user.name,
+        avatar: user.avatar,
+        likesCount: user.likesCount,
+        followingCount: user.followingCount,
+      }
       this.publishAccountSnapshot()
       if (this.loginVisible) {
         this.hideLogin()
@@ -711,7 +743,13 @@ export class DouyinTaskService {
       const user = await this.client.getCurrentUser()
       this.client.flushSession()
       this.secUserId = user.secUserId
-      this.account = { state: 'signedIn', name: user.name, avatar: user.avatar, likesCount: user.likesCount }
+      this.account = {
+        state: 'signedIn',
+        name: user.name,
+        avatar: user.avatar,
+        likesCount: user.likesCount,
+        followingCount: user.followingCount,
+      }
       this.publishAccountSnapshot()
       this.hideLogin()
       this.setLoginSnapshot({ state: 'idle' })

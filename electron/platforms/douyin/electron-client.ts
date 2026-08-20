@@ -5,9 +5,11 @@ import type { DouyinClient } from './client.js'
 import { detectDouyinLoginSurface } from './login-surface.js'
 import {
   assertDouyinSuccess,
+  assertDouyinMutationSuccess,
   parseBrowserResponse,
   parseCurrentUser,
   parseFavoritePage,
+  parseFollowingPage,
   parseLoginSurfaceResult,
 } from './parsers.js'
 import { isDouyinUrl, isSafeQrCodeDataUrl, registerDouyinNavigationGuards } from './policy.js'
@@ -21,7 +23,7 @@ const LOGIN_SURFACE_SCRIPT = `(${detectDouyinLoginSurface.toString()})()`
 export class ElectronDouyinClient implements DouyinClient {
   private workView?: WebContentsView
   private workspaceLoad?: Promise<void>
-  private crashCallback = () => {}
+  private readonly crashCallbacks = new Set<() => void>()
   private readonly readHostWindow: () => BrowserWindow | undefined
 
   constructor(readHostWindow: () => BrowserWindow | undefined) {
@@ -76,6 +78,30 @@ export class ElectronDouyinClient implements DouyinClient {
     return parseFavoritePage(payload, cursor)
   }
 
+  async loadFollowing(secUserId: string, cursor: string, count: number) {
+    let activeCursor = cursor
+    if (cursor === '0') {
+      const primer = await this.request('/aweme/v1/web/user/following/list/', {
+        aid: '6383',
+        count: String(count),
+        max_time: '0',
+        sec_user_id: secUserId,
+        source_type: '2',
+      }, 'GET', DOUYIN_ORIGIN)
+      const primed = parseFollowingPage(primer, cursor)
+      activeCursor = primed.nextCursor ?? cursor
+    }
+
+    const payload = await this.request('/aweme/v1/web/user/following/list/', {
+      aid: '6383',
+      count: String(count),
+      max_time: activeCursor,
+      sec_user_id: secUserId,
+      source_type: '1',
+    }, 'GET', DOUYIN_ORIGIN)
+    return parseFollowingPage(payload, activeCursor)
+  }
+
   async unlike(videoId: string) {
     const payload = await this.request('/aweme/v1/web/commit/item/digg/', {
       aid: '6383',
@@ -85,11 +111,18 @@ export class ElectronDouyinClient implements DouyinClient {
     assertDouyinSuccess(payload)
   }
 
+  async unfollow(secUserId: string) {
+    const payload = await this.request('/aweme/v1/web/commit/follow/user/', {
+      aid: '6383',
+      sec_user_id: secUserId,
+      type: '0',
+    }, 'POST')
+    assertDouyinMutationSuccess(payload)
+  }
+
   onWorkspaceCrash(callback: () => void) {
-    this.crashCallback = callback
-    return () => {
-      if (this.crashCallback === callback) this.crashCallback = () => {}
-    }
+    this.crashCallbacks.add(callback)
+    return () => this.crashCallbacks.delete(callback)
   }
 
   private createWorkspaceView() {
@@ -107,13 +140,20 @@ export class ElectronDouyinClient implements DouyinClient {
     workView.setBounds({ x: 0, y: 0, width: 1280, height: 800 })
     workView.setBorderRadius(18)
     registerDouyinNavigationGuards(workView.webContents)
-    workView.webContents.on('render-process-gone', () => this.crashCallback())
+    workView.webContents.on('render-process-gone', () => {
+      for (const callback of this.crashCallbacks) callback()
+    })
     this.workView = workView
     return workView
   }
 
-  private async request(path: string, query: Record<string, string>, method: 'GET' | 'POST' = 'GET') {
-    const url = new URL(path, DOUYIN_API_ORIGIN)
+  private async request(
+    path: string,
+    query: Record<string, string>,
+    method: 'GET' | 'POST' = 'GET',
+    origin = DOUYIN_API_ORIGIN,
+  ) {
+    const url = new URL(path, origin)
     for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value)
     const webContents = this.getWorkspaceView().webContents
     if (!isDouyinUrl(webContents.getURL())) {

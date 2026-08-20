@@ -5,6 +5,7 @@ import type {
   AccountSnapshot,
   DouyinBridge,
   LoginSnapshot,
+  FollowingTaskSnapshot,
   TaskSnapshot,
 } from '../../../shared/platforms/douyin/contracts.js'
 
@@ -37,6 +38,21 @@ export function createDouyinBridge(ipcRenderer: IpcRenderer): DouyinBridge {
       const listener = (_event: Electron.IpcRendererEvent, snapshot: LoginSnapshot) => callback(snapshot)
       ipcRenderer.on(DOUYIN_IPC_CHANNELS.login, listener)
       return () => ipcRenderer.removeListener(DOUYIN_IPC_CHANNELS.login, listener)
+    },
+    following: {
+      scan: () => ipcRenderer.invoke(DOUYIN_IPC_CHANNELS.following.scan),
+      loadMore: () => ipcRenderer.invoke(DOUYIN_IPC_CHANNELS.following.loadMore),
+      refreshCompletedList: () => ipcRenderer.invoke(DOUYIN_IPC_CHANNELS.following.refreshCompletedList),
+      start: (selectedIds: string[]) => ipcRenderer.invoke(DOUYIN_IPC_CHANNELS.following.start, selectedIds),
+      startAll: (limit?: number) => ipcRenderer.invoke(DOUYIN_IPC_CHANNELS.following.startAll, limit),
+      pause: () => ipcRenderer.invoke(DOUYIN_IPC_CHANNELS.following.pause),
+      resume: (selectedIds: string[]) => ipcRenderer.invoke(DOUYIN_IPC_CHANNELS.following.resume, selectedIds),
+      stop: () => ipcRenderer.invoke(DOUYIN_IPC_CHANNELS.following.stop),
+      onStatus: (callback: (snapshot: FollowingTaskSnapshot) => void) => {
+        const listener = (_event: Electron.IpcRendererEvent, snapshot: FollowingTaskSnapshot) => callback(snapshot)
+        ipcRenderer.on(DOUYIN_IPC_CHANNELS.following.status, listener)
+        return () => ipcRenderer.removeListener(DOUYIN_IPC_CHANNELS.following.status, listener)
+      },
     },
   }
 }

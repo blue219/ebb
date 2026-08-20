@@ -2,25 +2,38 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type UIEvent, 
 
 import { Button } from '@/components/ui/button'
 import {
-  DEFAULT_CLEAR_SCOPE,
-  clampClearLimit,
-  getClearTarget,
+  DEFAULT_BATCH_SCOPE,
+  clampBatchLimit,
+  getBatchTarget,
   getScopeSelectedIds,
   transitionToManualSelection,
-  type ClearScope,
-} from '@/shared/clear-scope'
+  type BatchScope,
+} from '@/shared/batch-scope'
 import type {
   AccountSnapshot,
   DouyinVideo,
+  FollowingTaskSnapshot,
   LoginSnapshot,
   TaskSnapshot,
   VideoStatus,
 } from '../../../shared/platforms/douyin/contracts'
 import { copy, type Locale } from './i18n'
+import { Icon } from './icons'
+import { FollowingAccountsPanel } from './FollowingAccountsPanel'
 
 const initialSnapshot: TaskSnapshot = {
   state: 'idle',
   videos: [],
+  counts: { loaded: 0, selected: 0, completed: 0, failed: 0 },
+  progress: { completed: 0, total: 0 },
+  hasMore: false,
+  isLoadingMore: false,
+  isRefreshingCompletedList: false,
+}
+
+const initialFollowingSnapshot: FollowingTaskSnapshot = {
+  state: 'idle',
+  accounts: [],
   counts: { loaded: 0, selected: 0, completed: 0, failed: 0 },
   progress: { completed: 0, total: 0 },
   hasMore: false,
@@ -37,29 +50,10 @@ const statusStyles: Record<VideoStatus, string> = {
   failed: 'text-red-600',
 }
 
-type IconName = 'check' | 'chevron' | 'globe' | 'heart' | 'loader' | 'logout' | 'pause' | 'play' | 'refresh' | 'shield' | 'stop' | 'warning' | 'x'
-
 type PendingClear =
   | { mode: 'all'; count: number }
   | { mode: 'limited'; count: number }
   | { mode: 'selected'; count: number; ids: string[] }
-
-function Icon({ name, className = '' }: { name: IconName; className?: string }) {
-  const props = { className: `inline-block shrink-0 ${className}`, fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
-  if (name === 'check') return <svg {...props}><path d="m5 12 4 4L19 6" /></svg>
-  if (name === 'chevron') return <svg {...props}><path d="m8 10 4 4 4-4" /></svg>
-  if (name === 'globe') return <svg {...props}><circle cx="12" cy="12" r="8" /><path d="M4 12h16M12 4c2.2 2.2 3.2 5 3.2 8S14.2 17.8 12 20c-2.2-2.2-3.2-5-3.2-8S9.8 6.2 12 4" /></svg>
-  if (name === 'heart') return <svg {...props}><path d="M20.8 8.6c0 5.2-8.8 10.2-8.8 10.2S3.2 13.8 3.2 8.6A4.6 4.6 0 0 1 12 6.7a4.6 4.6 0 0 1 8.8 1.9ZM4 4l16 16" /></svg>
-  if (name === 'loader') return <svg {...props}><path d="M20 12a8 8 0 1 1-2.3-5.7" /></svg>
-  if (name === 'logout') return <svg {...props}><path d="M10 5H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h4M14 8l4 4-4 4M18 12H9" /></svg>
-  if (name === 'pause') return <svg {...props}><circle cx="12" cy="12" r="8" /><path d="M10 9v6M14 9v6" /></svg>
-  if (name === 'play') return <svg {...props}><circle cx="12" cy="12" r="8" /><path d="m10 9 5 3-5 3Z" /></svg>
-  if (name === 'refresh') return <svg {...props}><path d="M20 7v5h-5M4 17v-5h5" /><path d="M18.1 9A7 7 0 0 0 6.7 6.7L4 9M5.9 15A7 7 0 0 0 17.3 17.3L20 15" /></svg>
-  if (name === 'shield') return <svg {...props}><path d="M12 3 19 6v5c0 4.6-3 7.8-7 10-4-2.2-7-5.4-7-10V6l7-3Z" /><path d="m8.7 12 2.1 2.1 4.5-4.4" /></svg>
-  if (name === 'stop') return <svg {...props}><circle cx="12" cy="12" r="8" /><path d="M9 9h6v6H9z" /></svg>
-  if (name === 'warning') return <svg {...props}><path d="m12 4 8 15H4L12 4Z" /><path d="M12 9v4M12 16h.01" /></svg>
-  return <svg {...props}><path d="m7 7 10 10M17 7 7 17" /></svg>
-}
 
 type VideoRowProps = {
   id: string
@@ -87,10 +81,12 @@ const VideoRow = memo(function VideoRow({ id, title, thumbnail, status, index, s
 function DouyinWorkspace() {
   const [locale, setLocale] = useState<Locale>('en')
   const [snapshot, setSnapshot] = useState(initialSnapshot)
+  const [followingSnapshot, setFollowingSnapshot] = useState(initialFollowingSnapshot)
+  const [activeWorkspace, setActiveWorkspace] = useState<'likes' | 'following'>('likes')
   const [account, setAccount] = useState<AccountSnapshot>({ state: 'checking' })
   const [login, setLogin] = useState<LoginSnapshot>({ state: 'idle' })
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  const [clearScope, setClearScope] = useState<ClearScope>(DEFAULT_CLEAR_SCOPE)
+  const [clearScope, setClearScope] = useState<BatchScope>(DEFAULT_BATCH_SCOPE)
   const [scopeInput, setScopeInput] = useState('All')
   const [scopeMenuOpen, setScopeMenuOpen] = useState(false)
   const [pendingClear, setPendingClear] = useState<PendingClear>()
@@ -102,6 +98,7 @@ function DouyinWorkspace() {
   const loadMorePendingRef = useRef(false)
   const loadMoreArmedRef = useRef(true)
   const autoScanStartedRef = useRef(false)
+  const followingScanStartedRef = useRef(false)
   const videoScrollRef = useRef<HTMLDivElement>(null)
   const scopeControlRef = useRef<HTMLDivElement>(null)
   const completedDismissTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
@@ -111,8 +108,10 @@ function DouyinWorkspace() {
     const stopStatus = window.ebb.douyin.onStatus(setSnapshot)
     const stopAccount = window.ebb.douyin.onAccount(setAccount)
     const stopLogin = window.ebb.douyin.onLogin(setLogin)
-    void window.ebb.douyin.getState().then(({ task, account: savedAccount, login: savedLogin }) => {
+    const stopFollowingStatus = window.ebb.douyin.following.onStatus(setFollowingSnapshot)
+    void window.ebb.douyin.getState().then(({ task, followingTask, account: savedAccount, login: savedLogin }) => {
       setSnapshot(task)
+      setFollowingSnapshot(followingTask)
       setAccount(savedAccount)
       setLogin(savedLogin)
     })
@@ -120,6 +119,7 @@ function DouyinWorkspace() {
       stopStatus()
       stopAccount()
       stopLogin()
+      stopFollowingStatus()
     }
   }, [])
 
@@ -155,9 +155,11 @@ function DouyinWorkspace() {
     () => getScopeSelectedIds(clearScope, visibleVideos, selectedIds),
     [clearScope, selectedIds, visibleVideos],
   )
-  const clearTarget = getClearTarget(clearScope, totalLikes, manualIdsForRemoval.length)
+  const clearTarget = getBatchTarget(clearScope, totalLikes, manualIdsForRemoval.length)
   const isTaskActive = snapshot.state === 'running' || snapshot.state === 'scanning' || snapshot.isLoadingMore || snapshot.isRefreshingCompletedList
   const isTaskLocked = isTaskActive || snapshot.state === 'paused'
+  const isWorkspaceSwitchLocked = ['running', 'paused'].includes(snapshot.state)
+    || ['running', 'paused'].includes(followingSnapshot.state)
   const isRemovalControlVisible = snapshot.progress.total > 0
     && ['running', 'paused', 'completed'].includes(snapshot.state)
     && (snapshot.state !== 'completed' || !completedControlDismissed)
@@ -187,7 +189,7 @@ function DouyinWorkspace() {
     for (const timeout of completedDismissTimersRef.current.values()) clearTimeout(timeout)
     completedDismissTimersRef.current.clear()
     setSelectedIds(new Set())
-    setClearScope(DEFAULT_CLEAR_SCOPE)
+    setClearScope(DEFAULT_BATCH_SCOPE)
     setScopeInput(t.all)
     setScopeMenuOpen(false)
     setDismissedVideoIds(new Set())
@@ -208,7 +210,7 @@ function DouyinWorkspace() {
   }
 
   const resetClearScope = () => {
-    setClearScope(DEFAULT_CLEAR_SCOPE)
+    setClearScope(DEFAULT_BATCH_SCOPE)
     setScopeInput(t.all)
     setSelectedIds(new Set())
     setScopeMenuOpen(false)
@@ -242,6 +244,7 @@ function DouyinWorkspace() {
   useEffect(() => {
     if (account.state === 'signedOut') {
       autoScanStartedRef.current = false
+      followingScanStartedRef.current = false
       setLoginOpen(true)
       return
     }
@@ -253,6 +256,15 @@ function DouyinWorkspace() {
     autoScanStartedRef.current = true
     void run(() => window.ebb.douyin.scan())
   }, [account.state])
+
+  useEffect(() => {
+    if (activeWorkspace !== 'following' || account.state !== 'signedIn') return
+    if (followingSnapshot.state !== 'idle' || followingScanStartedRef.current) return
+    followingScanStartedRef.current = true
+    void window.ebb.douyin.following.scan().catch(() => {
+      followingScanStartedRef.current = false
+    })
+  }, [account.state, activeWorkspace, followingSnapshot.state])
 
   useEffect(() => {
     if (snapshot.state !== 'scanning') return
@@ -324,7 +336,7 @@ function DouyinWorkspace() {
     if (container) requestNextPageNearBottom(container, true)
   }, [requestNextPageNearBottom, visibleVideos.length])
 
-  const selectClearScope = (scope: ClearScope) => {
+  const selectClearScope = (scope: BatchScope) => {
     setClearScope(scope)
     setScopeInput(scope.kind === 'all' ? t.all : scope.kind === 'manual' ? t.custom : String(scope.limit))
     if (scope.kind !== 'manual') setSelectedIds(new Set())
@@ -338,7 +350,7 @@ function DouyinWorkspace() {
       setScopeInput(clearScope.kind === 'all' ? t.all : clearScope.kind === 'manual' ? t.custom : String(clearScope.limit))
       return
     }
-    const limit = clampClearLimit(parsed, totalLikes)
+    const limit = clampBatchLimit(parsed, totalLikes)
     if (limit > 0) selectClearScope({ kind: 'limit', limit })
     else setScopeInput(t.all)
   }
@@ -384,14 +396,23 @@ function DouyinWorkspace() {
         <header className="flex min-h-14 shrink-0 items-center justify-between gap-4 px-2 sm:min-h-16 sm:px-3">
           <div className="flex min-w-0 items-baseline gap-3 sm:gap-5">
             <h1 className="shrink-0 text-[1.75rem] leading-none font-semibold tracking-[-0.055em]">Ebb</h1>
-            <p className="truncate text-xs text-zinc-500 sm:text-sm">{t.subtitle}</p>
+            <p className="truncate text-xs text-zinc-500 sm:text-sm">
+              {activeWorkspace === 'likes' ? t.subtitle : t.followingSubtitle}
+            </p>
           </div>
-          <Button variant="outline" className="h-9 shrink-0 rounded-xl border-zinc-200/90 bg-white/65 px-3 text-xs text-zinc-700 shadow-none" onClick={() => setLocale((current) => current === 'en' ? 'zh' : 'en')}>
-            <Icon name="globe" className="size-4" />
-            {locale === 'en' ? '中文' : 'English'}
-          </Button>
+          <div className="flex shrink-0 items-center gap-2">
+            <div className="flex rounded-xl border border-zinc-200/80 bg-white/55 p-1 text-xs shadow-sm" aria-label="Douyin workspace" role="group">
+              <button type="button" aria-pressed={activeWorkspace === 'likes'} className={`rounded-lg px-2.5 py-1.5 transition-colors ${activeWorkspace === 'likes' ? 'bg-zinc-950 text-white shadow-sm' : 'text-zinc-600 hover:bg-white/80'}`} disabled={isWorkspaceSwitchLocked} onClick={() => setActiveWorkspace('likes')}><span className="hidden sm:inline">{t.likedVideosTab}</span><Icon name="heart" className="size-4 sm:hidden" /></button>
+              <button type="button" aria-pressed={activeWorkspace === 'following'} aria-label={t.followingAccountsTab} className={`rounded-lg px-2.5 py-1.5 transition-colors ${activeWorkspace === 'following' ? 'bg-zinc-950 text-white shadow-sm' : 'text-zinc-600 hover:bg-white/80'}`} disabled={isWorkspaceSwitchLocked} onClick={() => setActiveWorkspace('following')}><span className="hidden sm:inline">{t.followingAccountsTab}</span><Icon name="users" className="size-4 sm:hidden" /></button>
+            </div>
+            <Button variant="outline" className="h-9 shrink-0 rounded-xl border-zinc-200/90 bg-white/65 px-3 text-xs text-zinc-700 shadow-none" onClick={() => setLocale((current) => current === 'en' ? 'zh' : 'en')}>
+              <Icon name="globe" className="size-4" />
+              {locale === 'en' ? '中文' : 'English'}
+            </Button>
+          </div>
         </header>
 
+        {activeWorkspace === 'likes' ? <>
         <section className="status-rail mb-2.5 grid shrink-0 gap-3 p-3 sm:p-4 lg:grid-cols-[minmax(220px,0.75fr)_minmax(260px,1fr)_auto] lg:items-center lg:gap-0">
           <div className="flex min-w-0 items-center gap-3 xl:pr-5">
             {account.avatar
@@ -443,11 +464,11 @@ function DouyinWorkspace() {
                   </button>
                 : <Button variant="destructive" className="h-9 rounded-xl bg-red-600 px-3 text-xs text-white shadow-[0_5px_14px_rgba(220,38,38,0.18)] hover:bg-red-700" disabled={!isSignedIn || isTaskLocked || busy || clearTarget <= 0} onClick={prepareClear}><Icon name="heart" className="size-4" /> {clearButtonLabel}</Button>}
               <Button variant="outline" className="h-9 rounded-xl border-zinc-200 bg-white/65 px-2.5 text-xs text-zinc-700 shadow-none" disabled={!['running', 'paused'].includes(snapshot.state) || busy} onClick={() => run(() => window.ebb.douyin.stop())}><Icon name="stop" className="size-4" /> {t.stop}</Button>
-              <div ref={scopeControlRef} className="clear-scope-control">
-                <div className="clear-scope-field" data-open={scopeMenuOpen}>
+              <div ref={scopeControlRef} className="batch-scope-control">
+                <div className="batch-scope-field" data-open={scopeMenuOpen}>
                   <input
                     aria-label={t.clearAmount}
-                    aria-controls="clear-scope-menu"
+                    aria-controls="batch-scope-menu"
                     aria-expanded={scopeMenuOpen}
                     aria-haspopup="listbox"
                     disabled={isTaskLocked || busy || !isSignedIn}
@@ -477,10 +498,10 @@ function DouyinWorkspace() {
                     <Icon name="chevron" className={`size-4 transition-transform ${scopeMenuOpen ? 'rotate-180' : ''}`} />
                   </button>
                 </div>
-                {scopeMenuOpen && <div id="clear-scope-menu" className="clear-scope-menu" role="listbox" aria-label={t.quickSelect}>
+                {scopeMenuOpen && <div id="batch-scope-menu" className="batch-scope-menu" role="listbox" aria-label={t.quickSelect}>
                   <p>{t.quickSelect}</p>
                   <div className="grid grid-cols-4 gap-1.5">
-                    <button type="button" role="option" aria-selected={clearScope.kind === 'all'} data-selected={clearScope.kind === 'all'} onMouseDown={(event) => event.preventDefault()} onClick={() => selectClearScope(DEFAULT_CLEAR_SCOPE)}>{t.all}</button>
+                    <button type="button" role="option" aria-selected={clearScope.kind === 'all'} data-selected={clearScope.kind === 'all'} onMouseDown={(event) => event.preventDefault()} onClick={() => selectClearScope(DEFAULT_BATCH_SCOPE)}>{t.all}</button>
                     {[10, 50, 100].map((amount) => <button type="button" role="option" aria-selected={clearScope.kind === 'limit' && clearScope.limit === amount} data-selected={clearScope.kind === 'limit' && clearScope.limit === amount} disabled={amount > totalLikes} key={amount} onMouseDown={(event) => event.preventDefault()} onClick={() => selectClearScope({ kind: 'limit', limit: amount })}>{amount}</button>)}
                   </div>
                   <span>{t.amountHint.replace('{count}', formatCount(totalLikes))}</span>
@@ -519,6 +540,7 @@ function DouyinWorkspace() {
             {snapshot.isLoadingMore || snapshot.isRefreshingCompletedList ? <span className="flex items-center gap-2"><Icon name="loader" className="size-3.5 animate-spin" /> {snapshot.isRefreshingCompletedList ? t.refreshingCompletedList : t.loadingMore}</span> : !snapshot.hasMore && <span className="flex items-center gap-2"><Icon name="check" className="size-3.5 text-emerald-600" /> {t.allLoaded}</span>}
           </div>
         </section>
+        </> : <FollowingAccountsPanel account={account} locale={locale} snapshot={followingSnapshot} onLogin={() => setLoginOpen(true)} onSignOut={signOut} />}
       </div>
 
       {loginOpen && <div className="fixed inset-0 z-50 grid place-items-center bg-zinc-950/25 p-3 backdrop-blur-md sm:p-5" role="presentation">

@@ -5,6 +5,8 @@ import type { WebContents } from 'electron'
 import {
   FAVORITES_PAGE_SIZE,
   AUTOMATIC_PREFETCH_THRESHOLD,
+  FOLLOWING_PAGE_SIZE,
+  FOLLOWING_PREFETCH_THRESHOLD,
   isSafeQrCodeDataUrl,
   registerDouyinNavigationGuards,
 } from './policy.ts'
@@ -82,6 +84,11 @@ test('blocks malformed subframe navigation', () => {
 test('loads liked videos in pages of 30 and prefetches at 10 rows', () => {
   expect(FAVORITES_PAGE_SIZE).toBe(30)
   expect(AUTOMATIC_PREFETCH_THRESHOLD).toBe(10)
+})
+
+test('loads following accounts in pages of 20 and prefetches at 5 rows', () => {
+  expect(FOLLOWING_PAGE_SIZE).toBe(20)
+  expect(FOLLOWING_PREFETCH_THRESHOLD).toBe(5)
 })
 
 test('accepts only bounded raster QR code data URLs', () => {

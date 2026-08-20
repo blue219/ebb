@@ -28,6 +28,14 @@ describe('Douyin preload bridge', () => {
     await bridge.resume(['2'])
     await bridge.stop()
     await bridge.signOut()
+    await bridge.following.scan()
+    await bridge.following.loadMore()
+    await bridge.following.refreshCompletedList()
+    await bridge.following.start(['account-1'])
+    await bridge.following.startAll(5)
+    await bridge.following.pause()
+    await bridge.following.resume(['account-2'])
+    await bridge.following.stop()
 
     expect(invoke.mock.calls).toEqual([
       [DOUYIN_IPC_CHANNELS.getState],
@@ -43,6 +51,14 @@ describe('Douyin preload bridge', () => {
       [DOUYIN_IPC_CHANNELS.resume, ['2']],
       [DOUYIN_IPC_CHANNELS.stop],
       [DOUYIN_IPC_CHANNELS.signOut],
+      [DOUYIN_IPC_CHANNELS.following.scan],
+      [DOUYIN_IPC_CHANNELS.following.loadMore],
+      [DOUYIN_IPC_CHANNELS.following.refreshCompletedList],
+      [DOUYIN_IPC_CHANNELS.following.start, ['account-1']],
+      [DOUYIN_IPC_CHANNELS.following.startAll, 5],
+      [DOUYIN_IPC_CHANNELS.following.pause],
+      [DOUYIN_IPC_CHANNELS.following.resume, ['account-2']],
+      [DOUYIN_IPC_CHANNELS.following.stop],
     ])
   })
 
@@ -61,9 +77,11 @@ describe('Douyin preload bridge', () => {
     const status = vi.fn()
     const account = vi.fn()
     const login = vi.fn()
+    const followingStatus = vi.fn()
     const stopStatus = bridge.onStatus(status)
     const stopAccount = bridge.onAccount(account)
     const stopLogin = bridge.onLogin(login)
+    const stopFollowingStatus = bridge.following.onStatus(followingStatus)
 
     const taskPayload = { state: 'ready' } as TaskSnapshot
     const accountPayload = { state: 'signedIn' } as AccountSnapshot
@@ -71,18 +89,22 @@ describe('Douyin preload bridge', () => {
     listeners.get(DOUYIN_IPC_CHANNELS.status)?.({} as Electron.IpcRendererEvent, taskPayload)
     listeners.get(DOUYIN_IPC_CHANNELS.account)?.({} as Electron.IpcRendererEvent, accountPayload)
     listeners.get(DOUYIN_IPC_CHANNELS.login)?.({} as Electron.IpcRendererEvent, loginPayload)
+    listeners.get(DOUYIN_IPC_CHANNELS.following.status)?.({} as Electron.IpcRendererEvent, { state: 'ready' })
 
     expect(status).toHaveBeenCalledWith(taskPayload)
     expect(account).toHaveBeenCalledWith(accountPayload)
     expect(login).toHaveBeenCalledWith(loginPayload)
+    expect(followingStatus).toHaveBeenCalledWith({ state: 'ready' })
 
     stopStatus()
     stopAccount()
     stopLogin()
+    stopFollowingStatus()
     expect(removeListener.mock.calls.map(([channel]) => channel)).toEqual([
       DOUYIN_IPC_CHANNELS.status,
       DOUYIN_IPC_CHANNELS.account,
       DOUYIN_IPC_CHANNELS.login,
+      DOUYIN_IPC_CHANNELS.following.status,
     ])
   })
 })

@@ -12,6 +12,7 @@ import type {
   DouyinFavoritePage,
 } from './client.ts'
 import { DouyinTaskService } from './task-service.ts'
+import { DouyinMutationCoordinator } from './mutation-coordinator.ts'
 
 const video = (id: string): DouyinVideo => ({ id, title: `Video ${id}`, status: 'pending' })
 const page = (ids: string[], nextCursor?: string, hasMore = false): DouyinFavoritePage => ({
@@ -65,6 +66,8 @@ class MemoryDouyinClient implements DouyinClient {
       throw new Error('Douyin API request was rejected: slow down')
     }
   }
+  async loadFollowing() { return { accounts: [], hasMore: false } }
+  async unfollow() {}
   onWorkspaceCrash(callback: () => void) {
     this.crashCallback = callback
     return () => { this.crashCallback = () => {} }
@@ -72,7 +75,7 @@ class MemoryDouyinClient implements DouyinClient {
   crash() { this.crashCallback() }
 }
 
-function createService(client = new MemoryDouyinClient()) {
+function createService(client = new MemoryDouyinClient(), coordinator = new DouyinMutationCoordinator()) {
   const taskSnapshots: TaskSnapshot[] = []
   const accountSnapshots: AccountSnapshot[] = []
   const loginSnapshots: LoginSnapshot[] = []
@@ -82,8 +85,9 @@ function createService(client = new MemoryDouyinClient()) {
     (snapshot) => accountSnapshots.push(snapshot),
     (snapshot) => loginSnapshots.push(snapshot),
     async () => {},
+    coordinator,
   )
-  return { accountSnapshots, client, loginSnapshots, service, taskSnapshots }
+  return { accountSnapshots, client, coordinator, loginSnapshots, service, taskSnapshots }
 }
 
 async function expectTaskState(service: DouyinTaskService, state: TaskSnapshot['state']) {
@@ -91,6 +95,22 @@ async function expectTaskState(service: DouyinTaskService, state: TaskSnapshot['
 }
 
 describe('Douyin removal task module', () => {
+  test('holds the shared mutation lock while running or paused and releases it when stopped', async () => {
+    const { client, coordinator, service } = createService()
+    client.pages.push(page(['1']))
+    client.unlikeFailures.set('1', 1)
+    await service.initialize()
+    await service.scan()
+
+    service.start(['1'])
+    await expectTaskState(service, 'paused')
+    expect(coordinator.currentOwner()).toBe('likes')
+    expect(() => coordinator.acquire('following')).toThrow(/liked-video task is active/i)
+
+    service.stop()
+    expect(coordinator.currentOwner()).toBeUndefined()
+  })
+
   test('initializes the account, scans pages, and deduplicates loaded videos', async () => {
     const { client, service } = createService()
     client.pages.push(page(['1', '2'], '10', true), page(['2', '3']))
@@ -299,7 +319,7 @@ describe('Douyin removal task module', () => {
 
   test('pause and stop wait for an in-flight mutation before preventing later requests', async () => {
     for (const action of ['pause', 'stop'] as const) {
-      const { client, service } = createService()
+      const { client, coordinator, service } = createService()
       client.pages.push(page(['1', '2']))
       let releaseUnlike = () => {}
       const unlikeBlocked = new Promise<void>((resolve) => { releaseUnlike = resolve })
@@ -310,6 +330,7 @@ describe('Douyin removal task module', () => {
       service.start(['1', '2'])
       await vi.waitFor(() => expect(client.unlikeAttempts).toEqual(['1']))
       service[action]()
+      if (action === 'stop') expect(coordinator.currentOwner()).toBe('likes')
       releaseUnlike()
       await vi.waitFor(() => expect(service.getTaskSnapshot().progress.completed).toBe(1))
 

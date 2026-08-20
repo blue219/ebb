@@ -1,12 +1,12 @@
 import { expect, test } from 'vitest'
 
 import {
-  DEFAULT_CLEAR_SCOPE,
-  clampClearLimit,
-  getClearTarget,
+  DEFAULT_BATCH_SCOPE,
+  clampBatchLimit,
+  getBatchTarget,
   getScopeSelectedIds,
   transitionToManualSelection,
-} from '../../src/shared/clear-scope.ts'
+} from '../../src/shared/batch-scope.ts'
 
 const videos = [
   { id: '1', status: 'pending' },
@@ -16,15 +16,15 @@ const videos = [
 ]
 
 test('defaults and resets to the all scope', () => {
-  expect(DEFAULT_CLEAR_SCOPE).toEqual({ kind: 'all' })
-  expect(getClearTarget(DEFAULT_CLEAR_SCOPE, 84, 0)).toBe(84)
+  expect(DEFAULT_BATCH_SCOPE).toEqual({ kind: 'all' })
+  expect(getBatchTarget(DEFAULT_BATCH_SCOPE, 84, 0)).toBe(84)
 })
 
-test('clamps custom limits to the current likes count', () => {
-  expect(clampClearLimit(-5, 84)).toBe(1)
-  expect(clampClearLimit(50.9, 84)).toBe(50)
-  expect(clampClearLimit(100, 84)).toBe(84)
-  expect(clampClearLimit(10, 0)).toBe(0)
+test('clamps custom limits to the current item count', () => {
+  expect(clampBatchLimit(-5, 84)).toBe(1)
+  expect(clampBatchLimit(50.9, 84)).toBe(50)
+  expect(clampBatchLimit(100, 84)).toBe(84)
+  expect(clampBatchLimit(10, 0)).toBe(0)
 })
 
 test('selects loaded rows for all and limited scopes', () => {
@@ -38,5 +38,5 @@ test('preserves generated selections when switching to manual mode', () => {
 })
 
 test('a manual scope with no rows has no clear target', () => {
-  expect(getClearTarget({ kind: 'manual' }, 84, 0)).toBe(0)
+  expect(getBatchTarget({ kind: 'manual' }, 84, 0)).toBe(0)
 })

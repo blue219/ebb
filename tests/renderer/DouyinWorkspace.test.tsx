@@ -9,6 +9,7 @@ import type {
   AccountSnapshot,
   DouyinBridge,
   DouyinStateSnapshot,
+  FollowingTaskSnapshot,
   LoginSnapshot,
   TaskSnapshot,
 } from '../../shared/platforms/douyin/contracts'
@@ -27,8 +28,24 @@ const readyTask = (overrides: Partial<TaskSnapshot> = {}): TaskSnapshot => ({
   ...overrides,
 })
 
-function createBridge(initial: DouyinStateSnapshot) {
+const readyFollowingTask = (overrides: Partial<FollowingTaskSnapshot> = {}): FollowingTaskSnapshot => ({
+  state: 'ready',
+  accounts: [
+    { secUserId: 'account-1', nickname: 'First account', uniqueId: 'first-id', relation: 'mutual', status: 'pending' },
+    { secUserId: 'account-2', nickname: 'Second account', relation: 'following', status: 'pending' },
+  ],
+  counts: { loaded: 2, selected: 0, completed: 0, failed: 0 },
+  progress: { completed: 0, total: 0 },
+  hasMore: false,
+  isLoadingMore: false,
+  isRefreshingCompletedList: false,
+  ...overrides,
+})
+
+function createBridge(initialState: Omit<DouyinStateSnapshot, 'followingTask'> & { followingTask?: FollowingTaskSnapshot }) {
+  const initial: DouyinStateSnapshot = { ...initialState, followingTask: initialState.followingTask ?? readyFollowingTask({ state: 'idle', accounts: [], counts: { loaded: 0, selected: 0, completed: 0, failed: 0 } }) }
   let statusListener = (_snapshot: TaskSnapshot) => {}
+  let followingStatusListener = (_snapshot: FollowingTaskSnapshot) => {}
   let accountListener = (_snapshot: AccountSnapshot) => {}
   let loginListener = (_snapshot: LoginSnapshot) => {}
   const bridge: DouyinBridge = {
@@ -48,23 +65,96 @@ function createBridge(initial: DouyinStateSnapshot) {
     onStatus: vi.fn((callback) => { statusListener = callback; return () => {} }),
     onAccount: vi.fn((callback) => { accountListener = callback; return () => {} }),
     onLogin: vi.fn((callback) => { loginListener = callback; return () => {} }),
+    following: {
+      scan: vi.fn().mockResolvedValue(undefined),
+      loadMore: vi.fn().mockResolvedValue(undefined),
+      refreshCompletedList: vi.fn().mockResolvedValue(undefined),
+      start: vi.fn().mockResolvedValue(undefined),
+      startAll: vi.fn().mockResolvedValue(undefined),
+      pause: vi.fn().mockResolvedValue(undefined),
+      resume: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn().mockResolvedValue(undefined),
+      onStatus: vi.fn((callback) => { followingStatusListener = callback; return () => {} }),
+    },
   }
   return {
     bridge,
     emitAccount(snapshot: AccountSnapshot) { act(() => accountListener(snapshot)) },
     emitLogin(snapshot: LoginSnapshot) { act(() => loginListener(snapshot)) },
     emitStatus(snapshot: TaskSnapshot) { act(() => statusListener(snapshot)) },
+    emitFollowingStatus(snapshot: FollowingTaskSnapshot) { act(() => followingStatusListener(snapshot)) },
   }
 }
 
-const signedInAccount: AccountSnapshot = { state: 'signedIn', name: 'Sky', likesCount: 2 }
+const signedInAccount: AccountSnapshot = { state: 'signedIn', name: 'Sky', likesCount: 2, followingCount: 2 }
 
 describe('Douyin workspace user flows', () => {
   beforeEach(() => localStorage.clear())
   afterEach(() => vi.restoreAllMocks())
 
+  test('switches to following accounts lazily and freezes a manual unfollow selection', async () => {
+    localStorage.setItem('ebb:saved-douyin-session', 'true')
+    const harness = createBridge({
+      task: readyTask(),
+      followingTask: readyFollowingTask({ state: 'idle', accounts: [], counts: { loaded: 0, selected: 0, completed: 0, failed: 0 } }),
+      account: signedInAccount,
+      login: { state: 'idle' },
+    })
+    window.ebb = { platform: 'win32', douyin: harness.bridge }
+    const user = userEvent.setup()
+    render(<DouyinWorkspace />)
+
+    expect(await screen.findByText('First video')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Following accounts' }))
+    expect(harness.bridge.following.scan).toHaveBeenCalledOnce()
+    harness.emitFollowingStatus(readyFollowingTask())
+    expect(await screen.findByText('First account')).toBeInTheDocument()
+    expect(screen.getAllByText('@first-id').length).toBeGreaterThan(0)
+    expect(screen.getByText('Mutual')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('checkbox', { name: 'First account' }))
+    await user.click(screen.getByRole('button', { name: 'Unfollow 1 accounts' }))
+    expect(screen.getByRole('dialog', { name: 'Unfollow 1 accounts?' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Unfollow accounts' }))
+    expect(harness.bridge.following.start).toHaveBeenCalledWith(['account-2'])
+  })
+
+  test('warns in both languages that live All unfollows are irreversible and include mutual follows', async () => {
+    localStorage.setItem('ebb:saved-douyin-session', 'true')
+    const harness = createBridge({
+      task: readyTask(),
+      followingTask: readyFollowingTask(),
+      account: signedInAccount,
+      login: { state: 'idle' },
+    })
+    window.ebb = { platform: 'win32', douyin: harness.bridge }
+    const user = userEvent.setup()
+    render(<DouyinWorkspace />)
+
+    await user.click(await screen.findByRole('button', { name: 'Following accounts' }))
+    await user.click(screen.getByRole('button', { name: 'Unfollow 2 accounts' }))
+    expect(screen.getByText(/cannot be undone.*Mutual follows.*followed elsewhere/i)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /中文/ }))
+    expect(screen.getByText(/无法撤销.*互关账号.*其他设备新增的关注/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '确认取消关注' }))
+    expect(harness.bridge.following.startAll).toHaveBeenCalledWith()
+  })
+
+  test('locks the workspace switcher while either task is running or paused', async () => {
+    localStorage.setItem('ebb:saved-douyin-session', 'true')
+    const harness = createBridge({
+      task: readyTask({ state: 'running', mode: 'limited', progress: { completed: 0, total: 1 } }),
+      account: signedInAccount,
+      login: { state: 'idle' },
+    })
+    window.ebb = { platform: 'win32', douyin: harness.bridge }
+    render(<DouyinWorkspace />)
+    expect(await screen.findByRole('button', { name: 'Following accounts' })).toBeDisabled()
+  })
+
   test('shows a QR code and scans once after sign-in succeeds', async () => {
-    const state: DouyinStateSnapshot = {
+    const state: Omit<DouyinStateSnapshot, 'followingTask'> = {
       task: readyTask({ state: 'idle', videos: [], counts: { loaded: 0, selected: 0, completed: 0, failed: 0 } }),
       account: { state: 'signedOut' },
       login: { state: 'ready', qrCode: 'data:image/png;base64,aA==' },

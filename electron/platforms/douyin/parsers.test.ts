@@ -2,9 +2,11 @@ import { describe, expect, test } from 'vitest'
 
 import {
   assertDouyinSuccess,
+  assertDouyinMutationSuccess,
   parseBrowserResponse,
   parseCurrentUser,
   parseFavoritePage,
+  parseFollowingPage,
   parseLoginSurfaceResult,
 } from './parsers.ts'
 
@@ -17,6 +19,7 @@ describe('untrusted Douyin responses', () => {
           sec_uid: 'account-1',
           nickname: 'Sky',
           favoriting_count: '42',
+          following_count: '17',
           avatar_thumb: { url_list: [null, 'https://example.test/avatar.jpg'] },
         },
       },
@@ -24,8 +27,53 @@ describe('untrusted Douyin responses', () => {
       secUserId: 'account-1',
       name: 'Sky',
       likesCount: 42,
+      followingCount: 17,
       avatar: 'https://example.test/avatar.jpg',
     })
+  })
+
+  test('parses following accounts with stable IDs, identifiers, and explicit mutual relationships', () => {
+    expect(parseFollowingPage({
+      status_code: 0,
+      has_more: 1,
+      min_time: '120',
+      total: '3',
+      followings: [
+        {
+          sec_uid: 'secure-1',
+          nickname: 'First account',
+          unique_id: 'first-id',
+          follower_status: 1,
+          avatar_thumb: { url_list: ['https://example.test/first.jpg'] },
+        },
+        { sec_uid: 'secure-2', nickname: '', unique_id: '' },
+        { nickname: 'Missing stable ID' },
+      ],
+    }, '100')).toEqual({
+      accounts: [
+        {
+          secUserId: 'secure-1',
+          nickname: 'First account',
+          uniqueId: 'first-id',
+          avatar: 'https://example.test/first.jpg',
+          relation: 'mutual',
+          status: 'pending',
+        },
+        {
+          secUserId: 'secure-2',
+          nickname: 'Douyin account',
+          uniqueId: undefined,
+          avatar: undefined,
+          relation: 'following',
+          status: 'pending',
+        },
+      ],
+      nextCursor: '120',
+      hasMore: true,
+      total: 3,
+    })
+
+    expect(parseFollowingPage({ has_more: 1, min_time: '120', followings: [] }, '120').hasMore).toBe(false)
   })
 
   test('rejects a response without a signed-in account', () => {
@@ -73,5 +121,8 @@ describe('untrusted Douyin responses', () => {
     expect(parseLoginSurfaceResult({ state: 'unknown' })).toEqual({ state: 'loading' })
     expect(() => parseLoginSurfaceResult(null)).toThrow(/readable QR code state/)
     expect(() => assertDouyinSuccess({ statusCode: 429, message: 'slow down' })).toThrow(/slow down/)
+    expect(() => assertDouyinMutationSuccess({})).toThrow(/explicit success/i)
+    expect(() => assertDouyinMutationSuccess({ status_code: 500, status_msg: 'rejected' })).toThrow(/rejected/)
+    expect(assertDouyinMutationSuccess({ status_code: 0 })).toBeUndefined()
   })
 })

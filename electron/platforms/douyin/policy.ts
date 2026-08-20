@@ -2,6 +2,8 @@ import type { WebContents } from 'electron'
 
 export const FAVORITES_PAGE_SIZE = 30
 export const AUTOMATIC_PREFETCH_THRESHOLD = 10
+export const FOLLOWING_PAGE_SIZE = 20
+export const FOLLOWING_PREFETCH_THRESHOLD = 5
 const MAX_QR_CODE_LENGTH = 1_000_000
 
 export const isSafeQrCodeDataUrl = (value: unknown): value is string => (

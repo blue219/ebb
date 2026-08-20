@@ -2,7 +2,7 @@ import { _electron as electron, expect, test, type ElectronApplication, type Pag
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 
-async function launchFixture(testOutput: string, scenario: 'success' | 'error') {
+async function launchFixture(testOutput: string, scenario: 'success' | 'error' | 'following-success' | 'following-error') {
   const userData = join(testOutput, 'user-data')
   await mkdir(userData, { recursive: true })
   const electronApp = await electron.launch({
@@ -54,7 +54,7 @@ test('runs an offline manual removal through pause, continue, and completion', a
     await window.getByRole('button', { name: 'Pause' }).click()
     await expect(window.getByRole('button', { name: 'Continue' })).toBeVisible()
     await window.getByRole('button', { name: 'Continue' }).click()
-    await expect(window.getByRole('button', { name: 'Reset' })).toBeVisible()
+    await expect(window.getByRole('button').filter({ hasText: 'Reset' })).toBeVisible()
     await expect(window.getByText('Offline removal fixture completed.')).toBeVisible()
 
     const externalRequests = await electronApp.evaluate(() => (
@@ -76,6 +76,49 @@ test('shows an injected mutation failure without contacting Douyin', async ({ br
     await window.getByRole('button', { name: 'Clear likes' }).click()
     await expect(window.getByText('Task paused')).toBeVisible()
     await expect(window.getByText('Douyin API request was rejected: offline fixture failure')).toBeVisible()
+
+    const externalRequests = await electronApp.evaluate(() => (
+      (globalThis as typeof globalThis & { getEbbExternalRequestCount: () => number }).getEbbExternalRequestCount()
+    ))
+    expect(externalRequests).toBe(0)
+    expect(runtimeErrors).toEqual([])
+  } finally {
+    await electronApp.close()
+  }
+})
+
+test('runs an offline manual unfollow through the production preload bridge', async ({ browserName: _browserName }, testInfo) => {
+  const { electronApp, runtimeErrors, window } = await launchFixture(testInfo.outputDir, 'following-success')
+  try {
+    await expectIsolatedWindow(electronApp, window)
+    await window.getByRole('button', { name: 'Following accounts' }).click()
+    await expect(window.getByText('Offline first account')).toBeVisible()
+    await window.getByRole('checkbox', { name: 'Offline first account' }).click()
+    await window.getByRole('button', { name: 'Unfollow 1 accounts' }).click()
+    await window.getByRole('button', { name: 'Unfollow accounts' }).click()
+    await expect(window.getByText('Offline unfollow fixture completed.')).toBeVisible()
+    await expect(window.getByRole('button').filter({ hasText: 'Reset' })).toBeVisible()
+
+    const externalRequests = await electronApp.evaluate(() => (
+      (globalThis as typeof globalThis & { getEbbExternalRequestCount: () => number }).getEbbExternalRequestCount()
+    ))
+    expect(externalRequests).toBe(0)
+    expect(runtimeErrors).toEqual([])
+  } finally {
+    await electronApp.close()
+  }
+})
+
+test('shows an injected unfollow failure without contacting Douyin', async ({ browserName: _browserName }, testInfo) => {
+  const { electronApp, runtimeErrors, window } = await launchFixture(testInfo.outputDir, 'following-error')
+  try {
+    await expectIsolatedWindow(electronApp, window)
+    await window.getByRole('button', { name: 'Following accounts' }).click()
+    await window.getByRole('checkbox', { name: 'Offline first account' }).click()
+    await window.getByRole('button', { name: 'Unfollow 1 accounts' }).click()
+    await window.getByRole('button', { name: 'Unfollow accounts' }).click()
+    await expect(window.getByText('Task paused')).toBeVisible()
+    await expect(window.getByText('Douyin API request was rejected: offline unfollow fixture failure')).toBeVisible()
 
     const externalRequests = await electronApp.evaluate(() => (
       (globalThis as typeof globalThis & { getEbbExternalRequestCount: () => number }).getEbbExternalRequestCount()

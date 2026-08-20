@@ -21,6 +21,8 @@ export default defineConfig({
         'electron/platforms/douyin/policy.ts',
         'electron/platforms/douyin/login-surface.ts',
         'electron/platforms/douyin/parsers.ts',
+        'electron/platforms/douyin/mutation-coordinator.ts',
+        'electron/platforms/douyin/following-task-service.ts',
         'electron/platforms/douyin/task-service.ts',
         'electron/platforms/douyin/preload-bridge.ts',
         'electron/platforms/douyin/ipc-handlers.ts',

@@ -17,7 +17,7 @@ React renderer
 - `src/App.tsx` selects the implemented platform workspace.
 - `electron/main.ts` owns the application window and platform-module lifecycle.
 - `electron/preload.ts` exposes the narrow `window.ebb` API.
-- `DouyinTaskService` owns authentication checks, pagination, task execution, and in-memory snapshots through an injected `DouyinClient` interface.
+- The Douyin platform module owns authentication checks and composes independent liked-video and following-account task modules through an injected `DouyinClient` interface.
 - `ElectronDouyinClient` is the production adapter for that interface. Its detached `WebContentsView` supplies the signed-in browser context required by Douyin. It is not rendered as a general-purpose browser in the app window.
 
 ## Directory ownership
@@ -45,7 +45,7 @@ docs/                             Architecture, domain, and validation documenta
 
 ## State and task flow
 
-The main process is authoritative for account, login, video, and task snapshots. The renderer requests an initial snapshot through `douyin:get-state` and then subscribes to `douyin:account`, `douyin:login`, and `douyin:status` events.
+The main process is authoritative for account, login, liked-video, following-account, and task snapshots. The renderer requests an initial snapshot through `douyin:get-state` and then subscribes to `douyin:account`, `douyin:login`, `douyin:status`, and `douyin:following:status` events.
 
 Renderer commands use `douyin:*` request channels. The preload bridge is the only renderer access to those channels; the renderer does not import Electron APIs.
 
@@ -59,12 +59,14 @@ Removal modes map to the service as follows:
 
 Selected removal keeps the current page and buffers replacement rows. Limited and all removal restart pagination at the first page after each batch because removing earlier likes shifts later results forward. Pause and stop are cooperative: the worker checks task state between network requests, so an in-flight request may finish first.
 
+Unfollow tasks use the same three scope boundaries with following-account IDs. The production adapter hides Douyin's 20-row following-list cursor priming. Automatic unfollow tasks restart at the first page because removing relationships shifts subsequent results forward. A shared mutation coordinator permits only one unlike or unfollow task at a time; a paused task retains ownership until it completes or stops.
+
 ## Persistence
 
 - The Douyin browser session uses Electron partition `persist:ebb-douyin`. Cookies and site storage survive restarts.
 - The renderer key `ebb:saved-douyin-session` is only a boolean hint used to avoid briefly opening the sign-in panel. It is not the source of truth for authentication.
 - Signing out clears the persistent partition and the renderer hint.
-- Video lists, selections, progress, and task results are held in memory and reset when the app exits.
+- Video and following-account lists, selections, progress, and task results are held in memory and reset when the app exits.
 
 Changing the partition name or renderer key is a session migration and must be planned as a compatibility change.
 
@@ -78,12 +80,14 @@ Changing the partition name or renderer key is a session migration and must be p
 
 The integration depends on a private external API and must treat every response as untrusted. Keep payload parsing defensive and pause mutation work on rejected responses.
 
+Douyin's documented [Open Platform following-list API](https://open.douyin.com/platform/resource/docs/openapi/account-management/get-subscriber-list/) requires OAuth scopes and an access token. That authorization model is separate from Ebb's local QR-code browser session, so the following-account module does not introduce OAuth or export credentials.
+
 ## Test topology
 
 - Vitest Node tests exercise domain policy, response parsing, preload/IPC mapping, and `DouyinTaskService` through an in-memory `DouyinClient` adapter.
 - Vitest jsdom tests exercise renderer behavior and the serializable login-surface detector through accessible user interactions.
 - Playwright launches a separate Electron test entry that loads the production renderer and preload with in-memory IPC handlers. It blocks external HTTP(S) requests and uses a temporary user-data directory, so it cannot reach the real account partition.
-- Live-account verification remains a manual release gate and is limited to one explicitly expendable like.
+- Live-account verification remains a manual release gate and is limited to one explicitly expendable like or one explicitly expendable following relationship per changed area.
 
 ## Build outputs
 

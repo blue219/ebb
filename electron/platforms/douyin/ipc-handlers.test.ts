@@ -4,6 +4,7 @@ import { describe, expect, test, vi } from 'vitest'
 import { DOUYIN_IPC_CHANNELS } from '../../../shared/platforms/douyin/contracts.ts'
 import { registerDouyinIpcHandlers } from './ipc-handlers.ts'
 import type { DouyinTaskService } from './task-service.ts'
+import type { DouyinFollowingTaskService } from './following-task-service.ts'
 
 describe('Douyin main-process IPC handlers', () => {
   test('exposes the state snapshot and delegates every command', async () => {
@@ -28,11 +29,24 @@ describe('Douyin main-process IPC handlers', () => {
       stop: vi.fn(),
       signOut: vi.fn(),
     } as unknown as DouyinTaskService
+    const following = {
+      getSnapshot: vi.fn(() => ({ state: 'ready', accounts: [] })),
+      scan: vi.fn(),
+      loadMore: vi.fn(),
+      refreshCompletedList: vi.fn(),
+      start: vi.fn(),
+      startAll: vi.fn(),
+      pause: vi.fn(),
+      resume: vi.fn(),
+      stop: vi.fn(),
+      resetForSignOut: vi.fn(),
+    } as unknown as DouyinFollowingTaskService
 
-    registerDouyinIpcHandlers(ipc, task)
+    registerDouyinIpcHandlers(ipc, task, following)
 
     expect(await handlers.get(DOUYIN_IPC_CHANNELS.getState)?.({})).toEqual({
       task: { state: 'ready' },
+      followingTask: { state: 'ready', accounts: [] },
       account: { state: 'signedIn' },
       login: { state: 'idle' },
     })
@@ -48,6 +62,14 @@ describe('Douyin main-process IPC handlers', () => {
     await handlers.get(DOUYIN_IPC_CHANNELS.resume)?.({}, ['2'])
     await handlers.get(DOUYIN_IPC_CHANNELS.stop)?.({})
     await handlers.get(DOUYIN_IPC_CHANNELS.signOut)?.({})
+    await handlers.get(DOUYIN_IPC_CHANNELS.following.scan)?.({})
+    await handlers.get(DOUYIN_IPC_CHANNELS.following.loadMore)?.({})
+    await handlers.get(DOUYIN_IPC_CHANNELS.following.refreshCompletedList)?.({})
+    await handlers.get(DOUYIN_IPC_CHANNELS.following.start)?.({}, ['account-1'])
+    await handlers.get(DOUYIN_IPC_CHANNELS.following.startAll)?.({}, 10)
+    await handlers.get(DOUYIN_IPC_CHANNELS.following.pause)?.({})
+    await handlers.get(DOUYIN_IPC_CHANNELS.following.resume)?.({}, ['account-2'])
+    await handlers.get(DOUYIN_IPC_CHANNELS.following.stop)?.({})
 
     expect(task.showLogin).toHaveBeenCalledOnce()
     expect(task.refreshLogin).toHaveBeenCalledOnce()
@@ -61,5 +83,11 @@ describe('Douyin main-process IPC handlers', () => {
     expect(task.resume).toHaveBeenCalledWith(['2'])
     expect(task.stop).toHaveBeenCalledOnce()
     expect(task.signOut).toHaveBeenCalledOnce()
+    expect(following.scan).toHaveBeenCalledOnce()
+    expect(following.start).toHaveBeenCalledWith(['account-1'])
+    expect(following.startAll).toHaveBeenCalledWith(10)
+    expect(following.resume).toHaveBeenCalledWith(['account-2'])
+    expect(following.stop).toHaveBeenCalledOnce()
+    expect(following.resetForSignOut).toHaveBeenCalledOnce()
   })
 })

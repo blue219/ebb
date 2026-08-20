@@ -1,5 +1,5 @@
-import type { DouyinVideo, LoginSnapshot } from '../../../shared/platforms/douyin/contracts.js'
-import type { DouyinCurrentUser, DouyinFavoritePage } from './client.js'
+import type { DouyinVideo, FollowingAccount, LoginSnapshot } from '../../../shared/platforms/douyin/contracts.js'
+import type { DouyinCurrentUser, DouyinFavoritePage, DouyinFollowingPage } from './client.js'
 
 export type JsonObject = Record<string, unknown>
 
@@ -48,6 +48,15 @@ export function assertDouyinSuccess(payload: JsonObject) {
   throw new Error(`Douyin API request was rejected: ${detail}`)
 }
 
+export function assertDouyinMutationSuccess(payload: JsonObject) {
+  const code = payload.status_code ?? payload.statusCode
+  if (code !== undefined && Number(code) === 0) return
+  if (code === undefined) {
+    throw new Error('Douyin did not report explicit success for the account change.')
+  }
+  assertDouyinSuccess(payload)
+}
+
 export function parseCurrentUser(payload: JsonObject): DouyinCurrentUser {
   assertDouyinSuccess(payload)
   const data = isObject(payload.data) ? payload.data : undefined
@@ -62,9 +71,39 @@ export function parseCurrentUser(payload: JsonObject): DouyinCurrentUser {
       name: readString(user, 'nickname') ?? readString(user, 'unique_id') ?? 'Douyin user',
       avatar: avatarSources.find((source): source is string => typeof source === 'string'),
       likesCount: readNumber(user, 'favoriting_count'),
+      followingCount: readNumber(user, 'following_count'),
     }
   }
   throw new Error('Douyin did not return the current user. Sign in again and retry.')
+}
+
+export function parseFollowingPage(payload: JsonObject, currentCursor: string): DouyinFollowingPage {
+  assertDouyinSuccess(payload)
+  const accounts: FollowingAccount[] = []
+  const records = Array.isArray(payload.followings) ? payload.followings.filter(isObject) : []
+  for (const record of records) {
+    const secUserId = readString(record, 'sec_uid') ?? readString(record, 'sec_user_id')
+    if (!secUserId) continue
+    const avatarObject = isObject(record.avatar_thumb) ? record.avatar_thumb : undefined
+    const avatarSources = avatarObject && Array.isArray(avatarObject.url_list) ? avatarObject.url_list : []
+    const uniqueId = readString(record, 'unique_id') || undefined
+    accounts.push({
+      secUserId,
+      nickname: readString(record, 'nickname') || 'Douyin account',
+      uniqueId,
+      avatar: avatarSources.find((source): source is string => typeof source === 'string'),
+      relation: readNumber(record, 'follower_status') === 1 ? 'mutual' : 'following',
+      status: 'pending',
+    })
+  }
+
+  const nextCursor = readString(payload, 'min_time') ?? readString(payload, 'max_time')
+  return {
+    accounts,
+    nextCursor,
+    hasMore: Boolean(payload.has_more && nextCursor && nextCursor !== currentCursor),
+    total: readNumber(payload, 'total'),
+  }
 }
 
 export function parseFavoritePage(payload: JsonObject, currentCursor: string): DouyinFavoritePage {

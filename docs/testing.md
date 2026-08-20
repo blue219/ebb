@@ -1,6 +1,6 @@
 # Testing
 
-Ebb separates deterministic checks from the one destructive release check. Automated tests never load Douyin, read the persistent account partition, or send an unlike request to a real account.
+Ebb separates deterministic checks from bounded destructive release checks. Automated tests never load Douyin, read the persistent account partition, or send an unlike or unfollow request to a real account.
 
 ## Automated checks
 
@@ -23,9 +23,10 @@ npm run verify
 
 The automated layers cover:
 
-- Clear-scope calculation and automatic-removal policy.
+- Batch-scope calculation and automatic-removal policy.
 - Navigation, QR-image, login-surface, and untrusted-response policy.
 - Account checks, 30-row pagination, low-water prefetching, deduplication, selected/limited/all removal, replacement rows, completed-list refresh, pause, continue, stop, rejected requests, stale counts, sign out, and workspace crashes.
+- Following-account parsing, 20-row pagination, selected/limited/live-all unfollow tasks, the shared mutation lock, and first-rejection pause behavior.
 - Preload command/event mapping and main-process IPC registration.
 - QR sign-in presentation, scope selection and confirmation, progress controls, error presentation, language switching, and load-more de-duplication.
 - Electron startup, preload availability, sandbox settings, offline removal flow, and injected failure behavior.
@@ -47,6 +48,20 @@ The Electron fixture uses `test-results/` for failure screenshots and traces. It
 9. Choose **Sign out**, restart, and confirm Ebb asks for a QR scan.
 
 Pause, continue, stop, rate-limit, and rejected-response scenarios are covered by deterministic fixtures. Do not spend additional real likes to repeat them.
+
+## Real-account unfollow release check
+
+> This procedure removes one real following relationship and Ebb cannot restore it. Choose an account you are willing to unfollow. Never use **All** for release verification.
+
+1. Run `npm run verify`; do not continue unless every automated gate passes.
+2. Run `npm run dev`, restore the saved session, and open **Following accounts**.
+3. Confirm the Following count, first 20 rows, account identifiers, mutual-follow markers, and next-page loading without starting a task.
+4. Select exactly one expendable account so the scope changes to **Custom**.
+5. Confirm and run the task, then verify it reaches **Completed**.
+6. Check in Douyin that the relationship was removed and that Ebb's Following count decreased by one.
+7. Refresh the following list and confirm the account is absent. Do not automatically follow it again.
+
+If the read-only list contract lacks stable IDs or reliable pagination, or if the private write request is rejected because its contract changed, stop verification and record the response difference. Do not fall back to DOM automation or signature engineering.
 
 ## Failure handling
 
