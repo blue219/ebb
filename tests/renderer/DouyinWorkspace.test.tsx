@@ -104,7 +104,7 @@ describe('Douyin workspace user flows', () => {
     const user = userEvent.setup()
     render(<DouyinWorkspace />)
 
-    expect(await screen.findByText('First video')).toBeInTheDocument()
+    expect(await screen.findByRole('checkbox', { name: 'First video' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Following accounts' }))
     expect(harness.bridge.following.scan).toHaveBeenCalledOnce()
     harness.emitFollowingStatus(readyFollowingTask())
@@ -173,13 +173,26 @@ describe('Douyin workspace user flows', () => {
     expect(localStorage.getItem('ebb:saved-douyin-session')).toBe('true')
   })
 
+  test('keeps the signed-out sidebar compact while retaining an accessible sign-in control', async () => {
+    const harness = createBridge({
+      task: readyTask({ state: 'idle', videos: [], counts: { loaded: 0, selected: 0, completed: 0, failed: 0 } }),
+      account: { state: 'signedOut' },
+      login: { state: 'ready', qrCode: 'data:image/png;base64,aA==' },
+    })
+    window.ebb = { platform: 'win32', douyin: harness.bridge }
+    render(<DouyinWorkspace />)
+
+    expect(await screen.findByRole('button', { name: 'Sign in with QR code' })).toHaveTextContent('')
+    expect(screen.queryByText('Sign in once to scan anytime')).not.toBeInTheDocument()
+  })
+
   test('freezes the visible manual selection before confirmation', async () => {
     localStorage.setItem('ebb:saved-douyin-session', 'true')
     const harness = createBridge({ task: readyTask(), account: signedInAccount, login: { state: 'idle' } })
     window.ebb = { platform: 'win32', douyin: harness.bridge }
     const user = userEvent.setup()
     render(<DouyinWorkspace />)
-    await screen.findByText('First video')
+    await screen.findByRole('checkbox', { name: 'First video' })
 
     await user.click(screen.getByRole('checkbox', { name: 'First video' }))
     expect(screen.getByRole('checkbox', { name: 'First video' })).not.toBeChecked()
@@ -286,13 +299,12 @@ describe('Douyin workspace user flows', () => {
     window.ebb = { platform: 'win32', douyin: harness.bridge }
     render(<DouyinWorkspace />)
 
-    await screen.findByText('First video')
+    await screen.findByRole('checkbox', { name: 'First video' })
     await waitFor(() => expect(harness.bridge.loadMore).toHaveBeenCalledOnce())
-    const table = screen.getByRole('table').parentElement
-    expect(table).not.toBeNull()
+    const collection = screen.getByTestId('video-collection')
     act(() => {
-      table?.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 100 }))
-      table?.dispatchEvent(new Event('scroll', { bubbles: true }))
+      collection.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 100 }))
+      collection.dispatchEvent(new Event('scroll', { bubbles: true }))
     })
     expect(harness.bridge.loadMore).toHaveBeenCalledOnce()
     finishLoad()

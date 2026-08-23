@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type UIEvent, type WheelEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type UIEvent, type WheelEvent } from 'react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -10,81 +10,24 @@ import {
   type BatchScope,
 } from '@/shared/batch-scope'
 import type {
-  AccountSnapshot,
   DouyinVideo,
-  FollowingTaskSnapshot,
-  LoginSnapshot,
-  TaskSnapshot,
-  VideoStatus,
 } from '../../../shared/platforms/douyin/contracts'
 import { copy, type Locale } from './i18n'
 import { Icon } from './icons'
 import { FollowingAccountsPanel } from './FollowingAccountsPanel'
-
-const initialSnapshot: TaskSnapshot = {
-  state: 'idle',
-  videos: [],
-  counts: { loaded: 0, selected: 0, completed: 0, failed: 0 },
-  progress: { completed: 0, total: 0 },
-  hasMore: false,
-  isLoadingMore: false,
-  isRefreshingCompletedList: false,
-}
-
-const initialFollowingSnapshot: FollowingTaskSnapshot = {
-  state: 'idle',
-  accounts: [],
-  counts: { loaded: 0, selected: 0, completed: 0, failed: 0 },
-  progress: { completed: 0, total: 0 },
-  hasMore: false,
-  isLoadingMore: false,
-  isRefreshingCompletedList: false,
-}
+import { useDouyinBridgeState } from './useDouyinBridgeState'
+import { VideoRow } from './VideoRow'
 
 const SAVED_DOUYIN_SESSION_KEY = 'ebb:saved-douyin-session'
-
-const statusStyles: Record<VideoStatus, string> = {
-  pending: 'text-zinc-500',
-  processing: 'text-zinc-900',
-  completed: 'text-emerald-700',
-  failed: 'text-red-600',
-}
 
 type PendingClear =
   | { mode: 'all'; count: number }
   | { mode: 'limited'; count: number }
   | { mode: 'selected'; count: number; ids: string[] }
 
-type VideoRowProps = {
-  id: string
-  title: string
-  thumbnail?: string
-  status: VideoStatus
-  index: number
-  selected: boolean
-  taskLocked: boolean
-  statusLabel: string
-  onToggle: (id: string) => void
-  onDismiss: (id: string) => void
-}
-
-// Status snapshots arrive after each removal; memoizing rows keeps unchanged videos out of that hot render path.
-const VideoRow = memo(function VideoRow({ id, title, thumbnail, status, index, selected, taskLocked, statusLabel, onToggle, onDismiss }: VideoRowProps) {
-  return <tr className={`border-t border-zinc-100/90 transition-colors hover:bg-zinc-50/80 ${selected ? 'bg-blue-50/65 hover:bg-blue-50/80' : ''} ${status === 'completed' ? 'video-row-removing' : ''}`} onAnimationEnd={() => status === 'completed' && onDismiss(id)}>
-    <td className="px-3 py-2 sm:px-5"><input aria-label={title} className="video-checkbox" type="checkbox" checked={selected} disabled={taskLocked || status === 'completed'} onChange={() => onToggle(id)} /></td>
-    <td className="px-1 py-2 text-center text-[11px] tabular-nums text-zinc-400">{index + 1}</td>
-    <td className="max-w-0 overflow-hidden px-2 py-2 sm:px-3"><div className="flex min-w-0 items-center gap-2 sm:gap-3">{thumbnail ? <img className="size-8 shrink-0 rounded-lg object-cover sm:size-10" src={thumbnail} alt="" loading="lazy" decoding="async" /> : <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-zinc-100 sm:size-10"><Icon name="heart" className="size-4 text-zinc-400" /></div>}<span className="min-w-0 truncate text-[13px] font-medium text-zinc-800 sm:text-sm" title={title}>{title}</span></div></td>
-    <td className={`whitespace-nowrap px-2 py-2 text-xs font-medium sm:px-3 ${statusStyles[status]}`}>{status === 'processing' && <Icon name="loader" className="mr-1 size-3 animate-spin" />}{statusLabel}</td>
-  </tr>
-})
-
 function DouyinWorkspace() {
   const [locale, setLocale] = useState<Locale>('en')
-  const [snapshot, setSnapshot] = useState(initialSnapshot)
-  const [followingSnapshot, setFollowingSnapshot] = useState(initialFollowingSnapshot)
   const [activeWorkspace, setActiveWorkspace] = useState<'likes' | 'following'>('likes')
-  const [account, setAccount] = useState<AccountSnapshot>({ state: 'checking' })
-  const [login, setLogin] = useState<LoginSnapshot>({ state: 'idle' })
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [clearScope, setClearScope] = useState<BatchScope>(DEFAULT_BATCH_SCOPE)
   const [scopeInput, setScopeInput] = useState('All')
@@ -93,6 +36,7 @@ function DouyinWorkspace() {
   const [completedControlDismissed, setCompletedControlDismissed] = useState(false)
   // This boolean contains no credentials; it only prevents a sign-in flash during session restoration.
   const [loginOpen, setLoginOpen] = useState(() => localStorage.getItem(SAVED_DOUYIN_SESSION_KEY) !== 'true')
+  const { account, followingTask: followingSnapshot, login, setTask: setSnapshot, task: snapshot } = useDouyinBridgeState(loginOpen)
   const [busy, setBusy] = useState(false)
   const [dismissedVideoIds, setDismissedVideoIds] = useState<Set<string>>(new Set())
   const loadMorePendingRef = useRef(false)
@@ -103,37 +47,6 @@ function DouyinWorkspace() {
   const scopeControlRef = useRef<HTMLDivElement>(null)
   const completedDismissTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
   const t = copy[locale]
-
-  useEffect(() => {
-    const stopStatus = window.ebb.douyin.onStatus(setSnapshot)
-    const stopAccount = window.ebb.douyin.onAccount(setAccount)
-    const stopLogin = window.ebb.douyin.onLogin(setLogin)
-    const stopFollowingStatus = window.ebb.douyin.following.onStatus(setFollowingSnapshot)
-    void window.ebb.douyin.getState().then(({ task, followingTask, account: savedAccount, login: savedLogin }) => {
-      setSnapshot(task)
-      setFollowingSnapshot(followingTask)
-      setAccount(savedAccount)
-      setLogin(savedLogin)
-    })
-    return () => {
-      stopStatus()
-      stopAccount()
-      stopLogin()
-      stopFollowingStatus()
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!loginOpen) return
-
-    void window.ebb.douyin.showLogin().catch((error) => {
-      setLogin({ state: 'error', message: error instanceof Error ? error.message : 'Unable to load the Douyin QR code.' })
-    })
-
-    return () => {
-      void window.ebb.douyin.hideLogin()
-    }
-  }, [loginOpen])
 
   // Derive the three list views together because this runs for every status snapshot during removal.
   const { visibleVideos, manualIdsForRemoval, loadedPendingCount } = useMemo(() => {
@@ -170,7 +83,7 @@ function DouyinWorkspace() {
   const likesDisplay = account.likesCount?.toLocaleString()
     ?? (snapshot.state === 'scanning' ? '…' : `${snapshot.counts.loaded}${snapshot.hasMore ? '+' : ''}`)
 
-  const run = async (action: () => Promise<void>) => {
+  const run = useCallback(async (action: () => Promise<void>) => {
     setBusy(true)
     try {
       await action()
@@ -183,7 +96,7 @@ function DouyinWorkspace() {
     } finally {
       setBusy(false)
     }
-  }
+  }, [setSnapshot])
 
   const refreshVideos = () => {
     for (const timeout of completedDismissTimersRef.current.values()) clearTimeout(timeout)
@@ -255,7 +168,7 @@ function DouyinWorkspace() {
     if (autoScanStartedRef.current) return
     autoScanStartedRef.current = true
     void run(() => window.ebb.douyin.scan())
-  }, [account.state])
+  }, [account.state, run])
 
   useEffect(() => {
     if (activeWorkspace !== 'following' || account.state !== 'signedIn') return
@@ -372,13 +285,6 @@ function DouyinWorkspace() {
     else setPendingClear({ mode: 'selected', count: manualIdsForRemoval.length, ids: [...manualIdsForRemoval] })
   }
 
-  const statusLabel = (status: VideoStatus) => ({
-    pending: t.statusPending,
-    processing: t.statusProcessing,
-    completed: t.statusCompleted,
-    failed: t.statusFailed,
-  })[status]
-
   const formatCount = (count: number) => count.toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US')
   const clearButtonLabel = t.clearLikes.replace('{count}', formatCount(clearTarget))
   const pendingClearTitle = pendingClear ? t.confirmClearTitle.replace('{count}', formatCount(pendingClear.count)) : ''
@@ -391,156 +297,80 @@ function DouyinWorkspace() {
     : ''
 
   return (
-    <main className="h-svh overflow-hidden bg-[#f4f5f7] p-2 text-zinc-950 sm:p-3">
-      <div className="app-shell mx-auto flex h-full w-full max-w-[1560px] flex-col overflow-hidden rounded-[24px] border border-white/90 bg-white/70 p-2.5 shadow-[0_18px_65px_rgba(0,0,0,0.08)] backdrop-blur-2xl sm:rounded-[28px] sm:p-3">
-        <header className="flex min-h-14 shrink-0 items-center justify-between gap-4 px-2 sm:min-h-16 sm:px-3">
-          <div className="flex min-w-0 items-baseline gap-3 sm:gap-5">
-            <h1 className="shrink-0 text-[1.75rem] leading-none font-semibold tracking-[-0.055em]">Ebb</h1>
-            <p className="truncate text-xs text-zinc-500 sm:text-sm">
-              {activeWorkspace === 'likes' ? t.subtitle : t.followingSubtitle}
-            </p>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <div className="flex rounded-xl border border-zinc-200/80 bg-white/55 p-1 text-xs shadow-sm" aria-label="Douyin workspace" role="group">
-              <button type="button" aria-pressed={activeWorkspace === 'likes'} className={`rounded-lg px-2.5 py-1.5 transition-colors ${activeWorkspace === 'likes' ? 'bg-zinc-950 text-white shadow-sm' : 'text-zinc-600 hover:bg-white/80'}`} disabled={isWorkspaceSwitchLocked} onClick={() => setActiveWorkspace('likes')}><span className="hidden sm:inline">{t.likedVideosTab}</span><Icon name="heart" className="size-4 sm:hidden" /></button>
-              <button type="button" aria-pressed={activeWorkspace === 'following'} aria-label={t.followingAccountsTab} className={`rounded-lg px-2.5 py-1.5 transition-colors ${activeWorkspace === 'following' ? 'bg-zinc-950 text-white shadow-sm' : 'text-zinc-600 hover:bg-white/80'}`} disabled={isWorkspaceSwitchLocked} onClick={() => setActiveWorkspace('following')}><span className="hidden sm:inline">{t.followingAccountsTab}</span><Icon name="users" className="size-4 sm:hidden" /></button>
-            </div>
-            <Button variant="outline" className="h-9 shrink-0 rounded-xl border-zinc-200/90 bg-white/65 px-3 text-xs text-zinc-700 shadow-none" onClick={() => setLocale((current) => current === 'en' ? 'zh' : 'en')}>
-              <Icon name="globe" className="size-4" />
-              {locale === 'en' ? '中文' : 'English'}
-            </Button>
-          </div>
-        </header>
-
-        {activeWorkspace === 'likes' ? <>
-        <section className="status-rail mb-2.5 grid shrink-0 gap-3 p-3 sm:p-4 lg:grid-cols-[minmax(220px,0.75fr)_minmax(260px,1fr)_auto] lg:items-center lg:gap-0">
-          <div className="flex min-w-0 items-center gap-3 xl:pr-5">
-            {account.avatar
-              ? <img className="size-11 shrink-0 rounded-full border border-white object-cover shadow-sm" src={account.avatar} alt="" />
-              : <div className="flex size-11 shrink-0 items-center justify-center rounded-full bg-zinc-100"><Icon name={account.state === 'checking' ? 'loader' : 'heart'} className={`size-5 text-zinc-500 ${account.state === 'checking' ? 'animate-spin' : ''}`} /></div>}
-            <div className="min-w-0 flex-1">
-              {!isSignedIn && <p className="text-[11px] font-medium text-zinc-500">Douyin</p>}
-              <h2 className="truncate text-sm font-semibold tracking-[-0.015em]">{account.state === 'checking' ? t.checkingLogin : account.name ?? t.notSignedIn}</h2>
-              {isSignedIn && <p className="mt-0.5 text-xs text-zinc-500">{likesDisplay} {t.likes}</p>}
-            </div>
-            {!isSignedIn && <Button className="h-9 shrink-0 rounded-xl bg-zinc-950 px-3 text-xs text-white hover:bg-zinc-800" disabled={busy || account.state === 'checking'} onClick={() => setLoginOpen(true)}><Icon name="globe" className="size-4" /> {t.login}</Button>}
-            {isSignedIn && <Button variant="outline" className="h-9 shrink-0 rounded-xl border-zinc-200 bg-white/70 px-3 text-xs text-zinc-700 shadow-none" disabled={busy || isTaskActive} onClick={signOut}><Icon name="logout" className="size-4" /> {t.signOut}</Button>}
-          </div>
-
-          <div className="flex min-w-0 items-center gap-3 border-zinc-200/70 lg:border-l lg:pl-5 xl:pr-5">
-            <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-zinc-100/85 text-zinc-600">
-              <Icon name={snapshot.state === 'paused' ? 'warning' : snapshot.state === 'completed' ? 'check' : 'shield'} className={`size-4.5 ${snapshot.state === 'paused' ? 'text-red-600' : snapshot.state === 'completed' ? 'text-emerald-600' : ''}`} />
-            </div>
-            <div className="min-w-0">
-              <p className="truncate text-sm font-medium text-zinc-950">{t.taskStates[snapshot.state]}</p>
-              <p className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-zinc-500">{snapshot.message ?? t.privacy}</p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-4 divide-x divide-zinc-200/70 rounded-xl border border-zinc-200/60 bg-white/45 px-1 py-2 lg:ml-4 lg:min-w-[310px]">
-            {[
-              [t.loaded, snapshot.counts.loaded],
-              [t.selected, activeCount],
-              [t.completed, snapshot.counts.completed],
-              [t.failed, snapshot.counts.failed],
-            ].map(([label, value], index) => <div className="px-2 text-center" key={label as string}>
-              <p className={`text-sm font-semibold tracking-[-0.025em] ${index === 1 && Number(value) > 0 ? 'text-blue-600' : index === 2 && Number(value) > 0 ? 'text-emerald-600' : index === 3 && Number(value) > 0 ? 'text-red-600' : 'text-zinc-800'}`}>{value}</p>
-              <p className="mt-0.5 truncate text-[10px] text-zinc-500">{label}</p>
-            </div>)}
-          </div>
-
-        </section>
-
-        <section className="table-surface flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-          <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-zinc-200/75 px-3 py-2.5 sm:px-4">
-              {isRemovalControlVisible
-                ? <button type="button" className="removal-progress group" data-complete={snapshot.state === 'completed'} aria-label={snapshot.state === 'completed' ? t.reset : snapshot.state === 'paused' ? t.continue : t.pause} title={snapshot.state === 'completed' ? t.reset : snapshot.state === 'paused' ? t.continue : t.pause} disabled={busy || (snapshot.state === 'paused' && snapshot.mode === 'selected' && !manualIdsForRemoval.length)} onClick={handleRemovalControl}>
-                    <span className="removal-progress-fill" style={{ width: `${removalPercent}%` }} />
-                    {snapshot.state === 'completed'
-                      ? <span className="removal-progress-action"><Icon name="check" className="size-4" /> 100%</span>
-                      : snapshot.state === 'paused'
-                      ? <span className="removal-progress-action"><Icon name="play" className="size-4" /> {t.continue}</span>
-                      : <><span className="removal-progress-label">{t.removing} {completedInCurrentRun}/{snapshot.progress.total}</span><span className="removal-progress-action removal-progress-hover"><Icon name="pause" className="size-4" /></span></>}
-                  </button>
-                : <Button variant="destructive" className="h-9 rounded-xl bg-red-600 px-3 text-xs text-white shadow-[0_5px_14px_rgba(220,38,38,0.18)] hover:bg-red-700" disabled={!isSignedIn || isTaskLocked || busy || clearTarget <= 0} onClick={prepareClear}><Icon name="heart" className="size-4" /> {clearButtonLabel}</Button>}
-              <Button variant="outline" className="h-9 rounded-xl border-zinc-200 bg-white/65 px-2.5 text-xs text-zinc-700 shadow-none" disabled={!['running', 'paused'].includes(snapshot.state) || busy} onClick={() => run(() => window.ebb.douyin.stop())}><Icon name="stop" className="size-4" /> {t.stop}</Button>
-              <div ref={scopeControlRef} className="batch-scope-control">
-                <div className="batch-scope-field" data-open={scopeMenuOpen}>
-                  <input
-                    aria-label={t.clearAmount}
-                    aria-controls="batch-scope-menu"
-                    aria-expanded={scopeMenuOpen}
-                    aria-haspopup="listbox"
-                    disabled={isTaskLocked || busy || !isSignedIn}
-                    inputMode="numeric"
-                    value={scopeInput}
-                    onBlur={commitScopeInput}
-                    onChange={(event) => setScopeInput(event.target.value.replace(/\D/g, ''))}
-                    onClick={(event) => {
-                      setScopeMenuOpen(true)
-                      event.currentTarget.select()
-                    }}
-                    onFocus={(event) => {
-                      setScopeMenuOpen(true)
-                      event.currentTarget.select()
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') {
-                        commitScopeInput()
-                        event.currentTarget.blur()
-                      } else if (event.key === 'Escape') {
-                        setScopeMenuOpen(false)
-                        event.currentTarget.blur()
-                      }
-                    }}
-                  />
-                  <button type="button" aria-label={t.quickSelect} disabled={isTaskLocked || busy || !isSignedIn} onMouseDown={(event) => event.preventDefault()} onClick={() => setScopeMenuOpen((current) => !current)}>
-                    <Icon name="chevron" className={`size-4 transition-transform ${scopeMenuOpen ? 'rotate-180' : ''}`} />
-                  </button>
-                </div>
-                {scopeMenuOpen && <div id="batch-scope-menu" className="batch-scope-menu" role="listbox" aria-label={t.quickSelect}>
-                  <p>{t.quickSelect}</p>
-                  <div className="grid grid-cols-4 gap-1.5">
-                    <button type="button" role="option" aria-selected={clearScope.kind === 'all'} data-selected={clearScope.kind === 'all'} onMouseDown={(event) => event.preventDefault()} onClick={() => selectClearScope(DEFAULT_BATCH_SCOPE)}>{t.all}</button>
-                    {[10, 50, 100].map((amount) => <button type="button" role="option" aria-selected={clearScope.kind === 'limit' && clearScope.limit === amount} data-selected={clearScope.kind === 'limit' && clearScope.limit === amount} disabled={amount > totalLikes} key={amount} onMouseDown={(event) => event.preventDefault()} onClick={() => selectClearScope({ kind: 'limit', limit: amount })}>{amount}</button>)}
-                  </div>
-                  <span>{t.amountHint.replace('{count}', formatCount(totalLikes))}</span>
-                </div>}
+    <main className="h-svh overflow-hidden bg-[#f4f6fa] p-0 text-zinc-950 sm:p-2">
+      <div className="app-shell mx-auto flex h-full w-full max-w-[1560px] flex-col overflow-hidden border border-white/90 bg-white/70 shadow-[0_18px_65px_rgba(0,0,0,0.08)] backdrop-blur-2xl sm:rounded-[28px] md:flex-row">
+        <aside className="workspace-sidebar" aria-label={t.platforms}>
+          <div>
+            <h1 className="text-[2rem] leading-none font-semibold tracking-[-0.065em]">Ebb</h1>
+            <div className="mt-7 flex min-w-0 items-center gap-3 rounded-2xl border border-white/85 bg-white/68 p-3 shadow-[0_5px_20px_rgba(15,23,42,0.04)]">
+              {account.avatar
+                ? <img className="size-10 shrink-0 rounded-full object-cover" src={account.avatar} alt="" />
+                : <div className="grid size-10 shrink-0 place-items-center rounded-full bg-zinc-100"><Icon name={account.state === 'checking' ? 'loader' : 'heart'} className={`size-4 text-zinc-500 ${account.state === 'checking' ? 'animate-spin' : ''}`} /></div>}
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold">{account.state === 'checking' ? t.checkingLogin : account.name ?? 'Douyin'}</p>
+                {isSignedIn && <p className="mt-0.5 text-xs text-zinc-500">{likesDisplay} {t.likes}</p>}
               </div>
-              {clearScope.kind !== 'all' && <Button variant="outline" className="h-9 rounded-xl border-zinc-200 bg-white/60 px-2.5 text-xs text-zinc-600 shadow-none" disabled={isTaskLocked} onClick={resetClearScope}><Icon name="x" className="size-4" /> {t.reset}</Button>}
-              <Button variant="outline" aria-label={t.refreshList} title={t.refreshList} className="ml-auto size-9 rounded-xl border-zinc-200 bg-white/60 p-0 text-zinc-700 shadow-none" disabled={!isSignedIn || busy || snapshot.state === 'running' || snapshot.state === 'paused' || snapshot.state === 'scanning' || snapshot.isLoadingMore || snapshot.isRefreshingCompletedList} onClick={refreshVideos}>
-                <Icon name="refresh" className={`size-5 ${snapshot.state === 'scanning' ? 'animate-spin' : ''}`} />
-              </Button>
+            </div>
           </div>
 
-          {visibleVideos.length ? <div ref={videoScrollRef} className="table-scroll min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto" onScroll={handleVideoScroll} onWheel={handleVideoWheel}>
-            <table className="w-full table-fixed text-left text-sm">
-              <colgroup><col className="w-11 sm:w-14" /><col className="w-8 sm:w-10" /><col /><col className="w-20 sm:w-28" /></colgroup>
-              <thead className="sticky top-0 z-10 bg-white/92 text-[11px] font-medium tracking-[0.02em] text-zinc-500 backdrop-blur-xl">
-                <tr><th className="px-3 py-2.5 sm:px-5" /><th className="px-1 py-2.5 text-center">#</th><th className="px-2 py-2.5 sm:px-3">{t.title}</th><th className="px-2 py-2.5 sm:px-3">{t.status}</th></tr>
-              </thead>
-              <tbody>
-                {visibleVideos.map((video, index) => <VideoRow
-                  key={video.id}
-                  id={video.id}
-                  title={video.title}
-                  thumbnail={video.thumbnail}
-                  status={video.status}
-                  index={index}
-                  selected={effectiveSelectedIds.has(video.id)}
-                  taskLocked={isTaskLocked}
-                  statusLabel={statusLabel(video.status)}
-                  onToggle={toggleVideo}
-                  onDismiss={dismissCompletedVideo}
-                />)}
-              </tbody>
-            </table>
-          </div> : snapshot.isRefreshingCompletedList ? <div className="grid flex-1 place-items-center px-6 py-14 text-center"><div><div className="mx-auto flex size-11 items-center justify-center rounded-2xl bg-zinc-100"><Icon name="loader" className="size-5 animate-spin text-zinc-500" /></div><h2 className="mt-4 text-base font-semibold">{t.refreshingCompletedList}</h2></div></div> : snapshot.completionRefreshError ? <div className="grid flex-1 place-items-center px-6 py-14 text-center"><div><div className="mx-auto flex size-11 items-center justify-center rounded-2xl bg-red-50"><Icon name="warning" className="size-5 text-red-600" /></div><h2 className="mt-4 text-base font-semibold">{t.refreshCompletedListFailed}</h2><p className="mt-1 max-w-xs text-sm leading-5 text-zinc-500">{snapshot.completionRefreshError}</p><Button variant="outline" className="mt-4 rounded-xl border-zinc-200 bg-white/70 text-xs" disabled={busy} onClick={() => run(() => window.ebb.douyin.refreshCompletedList())}><Icon name="refresh" className="size-4" /> {t.retryRefresh}</Button></div></div> : <div className="grid flex-1 place-items-center px-6 py-14 text-center"><div><div className="mx-auto flex size-11 items-center justify-center rounded-2xl bg-zinc-100"><Icon name="heart" className="size-5 text-zinc-500" /></div><h2 className="mt-4 text-base font-semibold">{t.emptyTitle}</h2><p className="mt-1 max-w-xs text-sm leading-5 text-zinc-500">{t.emptyBody}</p></div></div>}
-          <div className="flex h-10 shrink-0 items-center border-t border-zinc-200/70 px-4 text-[11px] text-zinc-500">
-            {snapshot.isLoadingMore || snapshot.isRefreshingCompletedList ? <span className="flex items-center gap-2"><Icon name="loader" className="size-3.5 animate-spin" /> {snapshot.isRefreshingCompletedList ? t.refreshingCompletedList : t.loadingMore}</span> : !snapshot.hasMore && <span className="flex items-center gap-2"><Icon name="check" className="size-3.5 text-emerald-600" /> {t.allLoaded}</span>}
+          <div className="mt-6 flex min-h-0 flex-1 flex-col gap-6">
+            <section>
+              <p className="mb-2 px-1 text-[11px] font-medium tracking-[0.08em] text-zinc-400 uppercase">{t.platforms}</p>
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2.5 rounded-xl border border-blue-200/80 bg-blue-50/75 px-3 py-2.5 text-sm text-blue-700">
+                  <span className="grid size-7 place-items-center rounded-lg bg-zinc-950 text-[10px] font-bold text-white">D</span>
+                  <span className="min-w-0 flex-1 font-medium">Douyin</span>
+                  {isSignedIn && <span className="flex items-center gap-1 text-[10px] font-medium"><span className="size-1.5 rounded-full bg-blue-500" />{t.connected}</span>}
+                </div>
+                {['TikTok', 'YouTube'].map((platform) => <div key={platform} aria-disabled="true" className="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm text-zinc-400">
+                  <span className="grid size-7 place-items-center rounded-lg bg-zinc-100 text-[10px] font-bold text-zinc-400">{platform.slice(0, 1)}</span>
+                  <span className="min-w-0 flex-1 font-medium">{platform}</span>
+                  <span className="text-[10px]">{t.comingSoon}</span>
+                </div>)}
+              </div>
+            </section>
           </div>
+
+          <div className="mt-5 flex gap-2 border-t border-zinc-200/70 pt-4">
+            <Button variant="outline" className="h-9 flex-1 rounded-xl border-zinc-200 bg-white/65 px-3 text-xs text-zinc-700 shadow-none" onClick={() => setLocale((current) => current === 'en' ? 'zh' : 'en')}><Icon name="globe" className="size-4" />{locale === 'en' ? '中文' : 'English'}</Button>
+            {!isSignedIn
+              ? <Button aria-label={t.login} className="size-9 rounded-xl bg-zinc-950 p-0 text-white hover:bg-zinc-800" disabled={busy || account.state === 'checking'} onClick={() => setLoginOpen(true)}><Icon name="globe" className="size-4" /></Button>
+              : <Button variant="outline" aria-label={t.signOut} title={t.signOut} className="size-9 rounded-xl border-zinc-200 bg-white/65 p-0 text-zinc-700 shadow-none" disabled={busy || isTaskActive} onClick={signOut}><Icon name="logout" className="size-4" /></Button>}
+          </div>
+        </aside>
+
+        <section className="workspace-content">
+          <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-zinc-200/70 px-4 py-3 sm:px-6 sm:py-4">
+            <div className="flex items-baseline gap-3">
+              <h2 className="text-xl font-semibold tracking-[-0.045em]">{activeWorkspace === 'likes' ? t.likedVideosTab : t.followingAccountsTab}</h2>
+              <span className="text-sm text-zinc-400">{activeWorkspace === 'likes' ? `${likesDisplay} ${t.likes}` : account.followingCount?.toLocaleString()}</span>
+            </div>
+            <nav className="flex rounded-xl border border-zinc-200/80 bg-white/60 p-1 text-xs shadow-sm" aria-label="Douyin workspace" role="group">
+              <button type="button" aria-pressed={activeWorkspace === 'likes'} className={`rounded-lg px-3 py-1.5 transition-colors ${activeWorkspace === 'likes' ? 'bg-zinc-950 text-white shadow-sm' : 'text-zinc-600 hover:bg-white/80'}`} disabled={isWorkspaceSwitchLocked} onClick={() => setActiveWorkspace('likes')}>{t.likedVideosTab}</button>
+              <button type="button" aria-pressed={activeWorkspace === 'following'} className={`rounded-lg px-3 py-1.5 transition-colors ${activeWorkspace === 'following' ? 'bg-zinc-950 text-white shadow-sm' : 'text-zinc-600 hover:bg-white/80'}`} disabled={isWorkspaceSwitchLocked} onClick={() => setActiveWorkspace('following')}>{t.followingAccountsTab}</button>
+            </nav>
+          </header>
+
+          {activeWorkspace === 'likes' ? <section className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+            <div className="flex shrink-0 items-center justify-between gap-3 px-4 py-3 sm:px-6">
+              <div className="min-w-0"><p className="truncate text-sm font-medium text-zinc-800">{t.taskStates[snapshot.state]}</p><p className="mt-0.5 truncate text-xs text-zinc-500">{snapshot.message ?? t.privacy}</p></div>
+              <Button variant="outline" aria-label={t.refreshList} title={t.refreshList} className="size-9 rounded-xl border-zinc-200 bg-white/65 p-0 text-zinc-700 shadow-none" disabled={!isSignedIn || busy || snapshot.state === 'running' || snapshot.state === 'paused' || snapshot.state === 'scanning' || snapshot.isLoadingMore || snapshot.isRefreshingCompletedList} onClick={refreshVideos}><Icon name="refresh" className={`size-5 ${snapshot.state === 'scanning' ? 'animate-spin' : ''}`} /></Button>
+            </div>
+
+            {visibleVideos.length ? <div ref={videoScrollRef} data-testid="video-collection" className="table-scroll min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto pb-28" onScroll={handleVideoScroll} onWheel={handleVideoWheel}>
+              <div className="video-cover-grid">{visibleVideos.map((video) => <VideoRow key={video.id} id={video.id} title={video.title} thumbnail={video.thumbnail} status={video.status} selected={effectiveSelectedIds.has(video.id)} taskLocked={isTaskLocked} onToggle={toggleVideo} onDismiss={dismissCompletedVideo} />)}</div>
+              <div className="flex h-10 items-center px-4 text-[11px] text-zinc-500">{snapshot.isLoadingMore || snapshot.isRefreshingCompletedList ? <span className="flex items-center gap-2"><Icon name="loader" className="size-3.5 animate-spin" /> {snapshot.isRefreshingCompletedList ? t.refreshingCompletedList : t.loadingMore}</span> : !snapshot.hasMore && <span className="flex items-center gap-2"><Icon name="check" className="size-3.5 text-emerald-600" /> {t.allLoaded}</span>}</div>
+            </div> : snapshot.isRefreshingCompletedList ? <div className="grid flex-1 place-items-center px-6 py-14 text-center"><div><div className="mx-auto flex size-11 items-center justify-center rounded-2xl bg-zinc-100"><Icon name="loader" className="size-5 animate-spin text-zinc-500" /></div><h3 className="mt-4 text-base font-semibold">{t.refreshingCompletedList}</h3></div></div> : snapshot.completionRefreshError ? <div className="grid flex-1 place-items-center px-6 py-14 text-center"><div><div className="mx-auto flex size-11 items-center justify-center rounded-2xl bg-red-50"><Icon name="warning" className="size-5 text-red-600" /></div><h3 className="mt-4 text-base font-semibold">{t.refreshCompletedListFailed}</h3><p className="mt-1 max-w-xs text-sm leading-5 text-zinc-500">{snapshot.completionRefreshError}</p><Button variant="outline" className="mt-4 rounded-xl border-zinc-200 bg-white/70 text-xs" disabled={busy} onClick={() => run(() => window.ebb.douyin.refreshCompletedList())}><Icon name="refresh" className="size-4" /> {t.retryRefresh}</Button></div></div> : <div className="grid flex-1 place-items-center px-6 py-14 text-center"><div><div className="mx-auto flex size-11 items-center justify-center rounded-2xl bg-zinc-100"><Icon name="heart" className="size-5 text-zinc-500" /></div><h3 className="mt-4 text-base font-semibold">{t.emptyTitle}</h3><p className="mt-1 max-w-xs text-sm leading-5 text-zinc-500">{t.emptyBody}</p></div></div>}
+
+            <div className="floating-action-bar">
+              <span className="px-2 text-sm font-medium text-zinc-600">{t.selected} {formatCount(activeCount)}</span>
+              <div ref={scopeControlRef} className="batch-scope-control"><div className="batch-scope-field" data-open={scopeMenuOpen}><input aria-label={t.clearAmount} aria-controls="batch-scope-menu" aria-expanded={scopeMenuOpen} aria-haspopup="listbox" disabled={isTaskLocked || busy || !isSignedIn} inputMode="numeric" value={scopeInput} onBlur={commitScopeInput} onChange={(event) => setScopeInput(event.target.value.replace(/\D/g, ''))} onClick={(event) => { setScopeMenuOpen(true); event.currentTarget.select() }} onFocus={(event) => { setScopeMenuOpen(true); event.currentTarget.select() }} onKeyDown={(event) => { if (event.key === 'Enter') { commitScopeInput(); event.currentTarget.blur() } else if (event.key === 'Escape') { setScopeMenuOpen(false); event.currentTarget.blur() } }} /><button type="button" aria-label={t.quickSelect} disabled={isTaskLocked || busy || !isSignedIn} onMouseDown={(event) => event.preventDefault()} onClick={() => setScopeMenuOpen((current) => !current)}><Icon name="chevron" className={`size-4 transition-transform ${scopeMenuOpen ? 'rotate-180' : ''}`} /></button></div>{scopeMenuOpen && <div id="batch-scope-menu" className="batch-scope-menu" role="listbox" aria-label={t.quickSelect}><p>{t.quickSelect}</p><div className="grid grid-cols-4 gap-1.5"><button type="button" role="option" aria-selected={clearScope.kind === 'all'} data-selected={clearScope.kind === 'all'} onMouseDown={(event) => event.preventDefault()} onClick={() => selectClearScope(DEFAULT_BATCH_SCOPE)}>{t.all}</button>{[10, 50, 100].map((amount) => <button type="button" role="option" aria-selected={clearScope.kind === 'limit' && clearScope.limit === amount} data-selected={clearScope.kind === 'limit' && clearScope.limit === amount} disabled={amount > totalLikes} key={amount} onMouseDown={(event) => event.preventDefault()} onClick={() => selectClearScope({ kind: 'limit', limit: amount })}>{amount}</button>)}</div><span>{t.amountHint.replace('{count}', formatCount(totalLikes))}</span></div>}</div>
+              {clearScope.kind !== 'all' && <Button variant="outline" className="h-11 rounded-xl border-zinc-200 bg-white/65 px-3.5 text-sm text-zinc-600 shadow-none" disabled={isTaskLocked} onClick={resetClearScope}><Icon name="x" className="size-4" /> {t.reset}</Button>}
+              {isRemovalControlVisible ? <button type="button" className="removal-progress group" data-complete={snapshot.state === 'completed'} aria-label={snapshot.state === 'completed' ? t.reset : snapshot.state === 'paused' ? t.continue : t.pause} title={snapshot.state === 'completed' ? t.reset : snapshot.state === 'paused' ? t.continue : t.pause} disabled={busy || (snapshot.state === 'paused' && snapshot.mode === 'selected' && !manualIdsForRemoval.length)} onClick={handleRemovalControl}><span className="removal-progress-fill" style={{ width: `${removalPercent}%` }} />{snapshot.state === 'completed' ? <span className="removal-progress-action"><Icon name="check" className="size-4" /> 100%</span> : snapshot.state === 'paused' ? <span className="removal-progress-action"><Icon name="play" className="size-4" /> {t.continue}</span> : <><span className="removal-progress-label">{t.removing} {completedInCurrentRun}/{snapshot.progress.total}</span><span className="removal-progress-action removal-progress-hover"><Icon name="pause" className="size-4" /></span></>}</button> : <Button variant="destructive" className="h-11 rounded-xl bg-red-600 px-4 text-sm text-white shadow-[0_5px_14px_rgba(220,38,38,0.18)] hover:bg-red-700" disabled={!isSignedIn || isTaskLocked || busy || clearTarget <= 0} onClick={prepareClear}><Icon name="heart" className="size-4" /> {clearButtonLabel}</Button>}
+              <Button variant="outline" className="h-11 rounded-xl border-zinc-200 bg-white/65 px-3.5 text-sm text-zinc-700 shadow-none" disabled={!['running', 'paused'].includes(snapshot.state) || busy} onClick={() => run(() => window.ebb.douyin.stop())}><Icon name="stop" className="size-4" /> {t.stop}</Button>
+            </div>
+          </section> : <FollowingAccountsPanel account={account} locale={locale} snapshot={followingSnapshot} />}
         </section>
-        </> : <FollowingAccountsPanel account={account} locale={locale} snapshot={followingSnapshot} onLogin={() => setLoginOpen(true)} onSignOut={signOut} />}
       </div>
 
       {loginOpen && <div className="fixed inset-0 z-50 grid place-items-center bg-zinc-950/25 p-3 backdrop-blur-md sm:p-5" role="presentation">

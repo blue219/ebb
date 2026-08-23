@@ -26,7 +26,7 @@ async function launchFixture(testOutput: string, scenario: 'success' | 'error' |
 async function expectIsolatedWindow(electronApp: ElectronApplication, page: Page) {
   await expect(page).toHaveTitle('Ebb')
   await expect(page.getByRole('heading', { name: 'Ebb' })).toBeVisible()
-  await expect(page.getByText('Offline first video')).toBeVisible()
+  await expect(page.getByRole('checkbox', { name: 'Offline first video' })).toBeVisible()
   await expect(page.locator('vite-error-overlay')).toHaveCount(0)
   expect(await page.evaluate(() => typeof window.ebb?.douyin?.getState)).toBe('function')
   expect(await page.evaluate(() => typeof (window as Window & { process?: unknown }).process)).toBe('undefined')

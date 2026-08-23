@@ -26,8 +26,6 @@ type Props = {
   account: AccountSnapshot
   locale: Locale
   snapshot: FollowingTaskSnapshot
-  onLogin: () => void
-  onSignOut: () => void
 }
 
 const statusStyles = {
@@ -69,7 +67,7 @@ const FollowingRow = memo(function FollowingRow({
   </tr>
 })
 
-export function FollowingAccountsPanel({ account, locale, snapshot, onLogin, onSignOut }: Props) {
+export function FollowingAccountsPanel({ account, locale, snapshot }: Props) {
   const t = copy[locale]
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [batchScope, setBatchScope] = useState<BatchScope>(DEFAULT_BATCH_SCOPE)
@@ -103,9 +101,6 @@ export function FollowingAccountsPanel({ account, locale, snapshot, onLogin, onS
     [batchScope, selectableAccounts, selectedIds],
   )
   const target = getBatchTarget(batchScope, totalFollowing, manualIds.length)
-  const activeCount = snapshot.state === 'running' || snapshot.state === 'paused'
-    ? snapshot.progress.total
-    : effectiveSelectedIds.size
   const completed = snapshot.progress.completed
   const percent = snapshot.progress.total ? Math.min(100, Math.round((completed / snapshot.progress.total) * 100)) : 0
   const showProgress = ['running', 'paused', 'completed'].includes(snapshot.state) && snapshot.progress.total > 0
@@ -219,19 +214,9 @@ export function FollowingAccountsPanel({ account, locale, snapshot, onLogin, onS
         ? t.confirmManualUnfollowBody.replace('{count}', formatCount(pendingUnfollow.count))
         : ''
 
-  return <>
-    <section className="status-rail mb-2.5 grid shrink-0 gap-3 p-3 sm:p-4 lg:grid-cols-[minmax(220px,0.75fr)_minmax(260px,1fr)_auto] lg:items-center lg:gap-0">
-      <div className="flex min-w-0 items-center gap-3 xl:pr-5">
-        {account.avatar ? <img className="size-11 shrink-0 rounded-full border border-white object-cover shadow-sm" src={account.avatar} alt="" /> : <div className="flex size-11 shrink-0 items-center justify-center rounded-full bg-zinc-100"><Icon name={account.state === 'checking' ? 'loader' : 'users'} className={`size-5 text-zinc-500 ${account.state === 'checking' ? 'animate-spin' : ''}`} /></div>}
-        <div className="min-w-0 flex-1"><p className="text-[11px] font-medium text-zinc-500">Douyin</p><h2 className="truncate text-sm font-semibold tracking-[-0.015em]">{account.state === 'checking' ? t.checkingLogin : account.name ?? t.notSignedIn}</h2>{isSignedIn && <p className="mt-0.5 text-xs text-zinc-500">{formatCount(totalFollowing)} {t.following}</p>}</div>
-        {!isSignedIn && <Button className="h-9 shrink-0 rounded-xl bg-zinc-950 px-3 text-xs text-white hover:bg-zinc-800" disabled={busy || account.state === 'checking'} onClick={onLogin}><Icon name="globe" className="size-4" /> {t.login}</Button>}
-        {isSignedIn && <Button variant="outline" className="h-9 shrink-0 rounded-xl border-zinc-200 bg-white/70 px-3 text-xs text-zinc-700 shadow-none" disabled={busy || isTaskActive} onClick={onSignOut}><Icon name="logout" className="size-4" /> {t.signOut}</Button>}
-      </div>
-      <div className="flex min-w-0 items-center gap-3 border-zinc-200/70 lg:border-l lg:pl-5 xl:pr-5"><div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-zinc-100/85 text-zinc-600"><Icon name={snapshot.state === 'paused' ? 'warning' : snapshot.state === 'completed' ? 'check' : 'shield'} className={`size-4.5 ${snapshot.state === 'paused' ? 'text-red-600' : snapshot.state === 'completed' ? 'text-emerald-600' : ''}`} /></div><div className="min-w-0"><p className="truncate text-sm font-medium text-zinc-950">{t.followingTaskStates[snapshot.state]}</p><p className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-zinc-500">{commandError ?? snapshot.message ?? t.privacy}</p></div></div>
-      <div className="grid grid-cols-4 divide-x divide-zinc-200/70 rounded-xl border border-zinc-200/60 bg-white/45 px-1 py-2 lg:ml-4 lg:min-w-[310px]">{[[t.loaded, snapshot.counts.loaded], [t.selected, activeCount], [t.completed, snapshot.counts.completed], [t.failed, snapshot.counts.failed]].map(([label, value], index) => <div className="px-2 text-center" key={label as string}><p className={`text-sm font-semibold tracking-[-0.025em] ${index === 1 && Number(value) > 0 ? 'text-blue-600' : index === 2 && Number(value) > 0 ? 'text-emerald-600' : index === 3 && Number(value) > 0 ? 'text-red-600' : 'text-zinc-800'}`}>{value}</p><p className="mt-0.5 truncate text-[10px] text-zinc-500">{label}</p></div>)}</div>
-    </section>
-
-    <section className="table-surface flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+  return <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+    <div className="flex shrink-0 items-center gap-3 px-4 py-3 sm:px-6"><div className="min-w-0"><p className="truncate text-sm font-medium text-zinc-800">{t.followingTaskStates[snapshot.state]}</p><p className="mt-0.5 truncate text-xs text-zinc-500">{commandError ?? snapshot.message ?? t.privacy}</p></div></div>
+    <section className="table-surface mx-4 mb-4 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden sm:mx-6 sm:mb-6">
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-zinc-200/75 px-3 py-2.5 sm:px-4">
         {showProgress ? <button type="button" className="removal-progress group" data-complete={snapshot.state === 'completed'} aria-label={snapshot.state === 'completed' ? t.reset : snapshot.state === 'paused' ? t.continue : t.pause} disabled={busy || (snapshot.state === 'paused' && snapshot.mode === 'selected' && !manualIds.length)} onClick={handleProgress}><span className="removal-progress-fill" style={{ width: `${percent}%` }} />{snapshot.state === 'completed' ? <span className="removal-progress-action"><Icon name="check" className="size-4" /> 100%</span> : snapshot.state === 'paused' ? <span className="removal-progress-action"><Icon name="play" className="size-4" /> {t.continue}</span> : <><span className="removal-progress-label">{t.unfollowing} {completed}/{snapshot.progress.total}</span><span className="removal-progress-action removal-progress-hover"><Icon name="pause" className="size-4" /></span></>}</button> : <Button variant="destructive" className="h-9 rounded-xl bg-red-600 px-3 text-xs text-white shadow-[0_5px_14px_rgba(220,38,38,0.18)] hover:bg-red-700" disabled={!isSignedIn || isTaskLocked || busy || target <= 0} onClick={prepare}><Icon name="users" className="size-4" /> {t.unfollowAccounts.replace('{count}', formatCount(target))}</Button>}
         <Button variant="outline" className="h-9 rounded-xl border-zinc-200 bg-white/65 px-2.5 text-xs text-zinc-700 shadow-none" disabled={!isTaskActive || busy} onClick={() => void run(() => window.ebb.douyin.following.stop())}><Icon name="stop" className="size-4" /> {t.stop}</Button>
@@ -244,5 +229,5 @@ export function FollowingAccountsPanel({ account, locale, snapshot, onLogin, onS
     </section>
 
     {pendingUnfollow && <div className="fixed inset-0 z-50 grid place-items-center bg-black/20 p-4 backdrop-blur-sm" role="presentation"><section aria-modal="true" role="dialog" aria-labelledby="confirm-unfollow-title" className="w-full max-w-md rounded-[24px] border border-white/80 bg-white/95 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.2)]"><Icon name="warning" className="size-6 text-red-600" /><h2 id="confirm-unfollow-title" className="mt-4 text-xl font-semibold tracking-[-0.035em]">{confirmTitle}</h2><p className="mt-2 text-sm leading-5 text-zinc-600">{confirmBody}</p><div className="mt-6 flex justify-end gap-2"><Button variant="outline" className="rounded-xl border-zinc-200" onClick={() => setPendingUnfollow(undefined)}>{t.cancel}</Button><Button variant="destructive" className="rounded-xl bg-red-600 text-white hover:bg-red-700" onClick={start}>{t.confirmUnfollow}</Button></div></section></div>}
-  </>
+  </section>
 }

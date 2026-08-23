@@ -2,8 +2,9 @@ export type Locale = 'en' | 'zh'
 
 export const copy = {
   en: {
-    subtitle: 'A private workspace for your liked videos',
-    followingSubtitle: 'A private workspace for accounts you follow',
+    platforms: 'Platforms',
+    connected: 'Connected',
+    comingSoon: 'Coming soon',
     likedVideosTab: 'Liked videos',
     followingAccountsTab: 'Following accounts',
     login: 'Sign in with QR code',
@@ -99,8 +100,9 @@ export const copy = {
     },
   },
   zh: {
-    subtitle: '私密处理你的点赞视频',
-    followingSubtitle: '私密管理你关注的账号',
+    platforms: '平台',
+    connected: '已连接',
+    comingSoon: '即将支持',
     likedVideosTab: '点赞视频',
     followingAccountsTab: '关注账号',
     login: '扫码登录',
