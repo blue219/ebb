@@ -20,7 +20,7 @@ app.setPath('userData', userDataPath)
 
 let mainWindow: BrowserWindow | undefined
 let externalRequestCount = 0
-let account: AccountSnapshot = { state: 'signedIn', name: 'Offline tester', likesCount: 2, followingCount: 2 }
+let account: AccountSnapshot = { state: 'signedIn', name: 'Offline tester', likedVideosCount: 2, followingCount: 2, collectedVideosCount: 2 }
 let login: LoginSnapshot = { state: 'idle' }
 let task: TaskSnapshot = {
   state: 'ready',
@@ -37,8 +37,20 @@ let task: TaskSnapshot = {
 let followingTask: FollowingTaskSnapshot = {
   state: 'ready',
   accounts: [
-    { secUserId: 'offline-account-1', nickname: 'Offline first account', uniqueId: 'offline-first', relation: 'mutual', status: 'pending' },
-    { secUserId: 'offline-account-2', nickname: 'Offline second account', uniqueId: 'offline-second', relation: 'following', status: 'pending' },
+    { id: 'offline-account-1', displayName: 'Offline first account', username: 'offline-first', relation: 'mutual', status: 'pending' },
+    { id: 'offline-account-2', displayName: 'Offline second account', username: 'offline-second', relation: 'following', status: 'pending' },
+  ],
+  counts: { loaded: 2, selected: 0, completed: 0, failed: 0 },
+  progress: { completed: 0, total: 0 },
+  hasMore: false,
+  isLoadingMore: false,
+  isRefreshingCompletedList: false,
+}
+let collectionTask: TaskSnapshot = {
+  state: 'ready',
+  videos: [
+    { id: 'saved-fixture-1', title: 'Offline saved video', status: 'pending' },
+    { id: 'saved-fixture-2', title: 'Offline second saved video', status: 'pending' },
   ],
   counts: { loaded: 2, selected: 0, completed: 0, failed: 0 },
   progress: { completed: 0, total: 0 },
@@ -49,6 +61,7 @@ let followingTask: FollowingTaskSnapshot = {
 
 const publishTask = () => mainWindow?.webContents.send(DOUYIN_IPC_CHANNELS.status, task)
 const publishFollowingTask = () => mainWindow?.webContents.send(DOUYIN_IPC_CHANNELS.following.status, followingTask)
+const publishCollectionTask = () => mainWindow?.webContents.send(DOUYIN_IPC_CHANNELS.collection.status, collectionTask)
 const beginTask = (mode: 'selected' | 'limited' | 'all', total: number) => {
   if (scenario === 'error') {
     task = {
@@ -87,7 +100,7 @@ const likedVideoController = {
   async loadMore() {},
   async refreshCompletedList() {},
   start(selectedIds: string[]) { beginTask('selected', selectedIds.length) },
-  async startAll(limit?: number) { beginTask(limit === undefined ? 'all' : 'limited', limit ?? account.likesCount ?? 0) },
+  async startAll(limit?: number) { beginTask(limit === undefined ? 'all' : 'limited', limit ?? account.likedVideosCount ?? 0) },
   pause() {
     if (task.state !== 'running') return
     task = { ...task, state: 'paused', message: 'Paused by the offline fixture.' }
@@ -107,7 +120,7 @@ const likedVideoController = {
         progress: { completed, total: completed },
         message: 'Offline removal fixture completed.',
       }
-      account = { ...account, likesCount: Math.max(0, (account.likesCount ?? 0) - completed) }
+      account = { ...account, likedVideosCount: Math.max(0, (account.likedVideosCount ?? 0) - completed) }
       publishTask()
       mainWindow?.webContents.send(DOUYIN_IPC_CHANNELS.account, account)
     }, 30)
@@ -121,6 +134,36 @@ const likedVideoController = {
     task = { ...task, state: 'idle', videos: [], counts: { loaded: 0, selected: 0, completed: 0, failed: 0 } }
     mainWindow?.webContents.send(DOUYIN_IPC_CHANNELS.account, account)
     publishTask()
+  },
+  resetForSignOut() {},
+}
+
+const collectionController = {
+  getTaskSnapshot: () => collectionTask,
+  getAccountSnapshot: () => account,
+  getLoginSnapshot: () => login,
+  async showLogin() {}, async refreshLogin() {}, hideLogin() {},
+  async scan() { publishCollectionTask() },
+  async loadMore() {}, async refreshCompletedList() {},
+  start(selectedIds: string[]) {
+    const total = selectedIds.length
+    collectionTask = { ...collectionTask, state: 'running', mode: 'selected', counts: { ...collectionTask.counts, selected: total }, progress: { completed: 0, total }, message: 'Offline collection fixture is running.' }
+    publishCollectionTask()
+    setTimeout(() => {
+      collectionTask = { ...collectionTask, state: 'completed', videos: collectionTask.videos.map((item) => selectedIds.includes(item.id) ? { ...item, status: 'completed' } : item), counts: { ...collectionTask.counts, completed: total, failed: 0 }, progress: { completed: total, total }, message: 'Offline collection fixture completed.' }
+      account = { ...account, collectedVideosCount: Math.max(0, (account.collectedVideosCount ?? 0) - total) }
+      publishCollectionTask()
+      mainWindow?.webContents.send(DOUYIN_IPC_CHANNELS.account, account)
+    }, 30)
+  },
+  async startAll(limit?: number) { this.start(collectionTask.videos.slice(0, limit ?? collectionTask.videos.length).map((item) => item.id)) },
+  pause() { if (collectionTask.state === 'running') { collectionTask = { ...collectionTask, state: 'paused' }; publishCollectionTask() } },
+  resume() { if (collectionTask.state === 'paused') { collectionTask = { ...collectionTask, state: 'running' }; publishCollectionTask() } },
+  stop() { collectionTask = { ...collectionTask, state: 'stopped' }; publishCollectionTask() },
+  async signOut() {},
+  resetForSignOut() {
+    collectionTask = { ...collectionTask, state: 'idle', videos: [], counts: { loaded: 0, selected: 0, completed: 0, failed: 0 }, progress: { completed: 0, total: 0 } }
+    publishCollectionTask()
   },
 }
 
@@ -136,7 +179,7 @@ const followingController = {
         ...followingTask,
         state: 'paused',
         mode: 'selected',
-        accounts: followingTask.accounts.map((item) => selectedIds.includes(item.secUserId) ? { ...item, status: 'failed' } : item),
+        accounts: followingTask.accounts.map((item) => selectedIds.includes(item.id) ? { ...item, status: 'failed' } : item),
         counts: { ...followingTask.counts, selected: total, failed: 1 },
         progress: { completed: 0, total },
         message: 'Douyin API request was rejected: offline unfollow fixture failure',
@@ -157,7 +200,7 @@ const followingController = {
       followingTask = {
         ...followingTask,
         state: 'completed',
-        accounts: followingTask.accounts.map((item) => selectedIds.includes(item.secUserId) ? { ...item, status: 'completed' } : item),
+        accounts: followingTask.accounts.map((item) => selectedIds.includes(item.id) ? { ...item, status: 'completed' } : item),
         counts: { ...followingTask.counts, completed: total, failed: 0 },
         progress: { completed: total, total },
         message: 'Offline unfollow fixture completed.',
@@ -169,7 +212,7 @@ const followingController = {
   },
   async startAll(limit?: number) {
     const target = limit ?? followingTask.accounts.length
-    return this.start(followingTask.accounts.slice(0, target).map((item) => item.secUserId))
+    return this.start(followingTask.accounts.slice(0, target).map((item) => item.id))
   },
   pause() {
     if (followingTask.state !== 'running') return
@@ -191,7 +234,7 @@ const followingController = {
   },
 }
 
-registerDouyinIpcHandlers(ipcMain, likedVideoController, followingController)
+registerDouyinIpcHandlers(ipcMain, likedVideoController, followingController, collectionController)
 
 app.whenReady().then(async () => {
   session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (_details, callback) => {

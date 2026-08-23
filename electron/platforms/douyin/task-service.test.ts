@@ -22,13 +22,17 @@ const page = (ids: string[], nextCursor?: string, hasMore = false): DouyinFavori
 })
 
 class MemoryDouyinClient implements DouyinClient {
-  user: DouyinCurrentUser = { secUserId: 'account-1', name: 'Sky', likesCount: 8 }
+  user: DouyinCurrentUser = { id: 'account-1', name: 'Sky', likedVideosCount: 8 }
   login: LoginSnapshot = { state: 'ready', qrCode: 'data:image/png;base64,aA==' }
   pages: Array<DouyinFavoritePage | Error> = []
+  collectionPages: Array<DouyinFavoritePage | Error> = []
   favoriteRequests: Array<{ cursor: string, count: number }> = []
+  collectionRequests: Array<{ cursor: string, count: number }> = []
   unlikeAttempts: string[] = []
+  uncollectAttempts: string[] = []
   unlikeFailures = new Map<string, number>()
   beforeUnlike?: (videoId: string) => Promise<void>
+  beforeRefreshLogin?: () => Promise<void>
   loginError?: Error
   currentUserError?: Error
   initialized = 0
@@ -36,11 +40,16 @@ class MemoryDouyinClient implements DouyinClient {
   cleared = false
   flushed = false
   refreshed = false
+  refreshLoginCalls = 0
   private crashCallback = () => {}
 
   async initialize() { this.initialized += 1 }
   dispose() { this.disposed = true }
-  async refreshLogin() { this.refreshed = true }
+  async refreshLogin() {
+    this.refreshLoginCalls += 1
+    await this.beforeRefreshLogin?.()
+    this.refreshed = true
+  }
   async clearSession() { this.cleared = true }
   flushSession() { this.flushed = true }
   async getCurrentUser() {
@@ -51,7 +60,7 @@ class MemoryDouyinClient implements DouyinClient {
     if (this.loginError) throw this.loginError
     return this.login
   }
-  async loadFavorites(_secUserId: string, cursor: string, count: number) {
+  async loadFavorites(_id: string, cursor: string, count: number) {
     this.favoriteRequests.push({ cursor, count })
     const response = this.pages.shift() ?? page([])
     if (response instanceof Error) throw response
@@ -66,6 +75,13 @@ class MemoryDouyinClient implements DouyinClient {
       throw new Error('Douyin API request was rejected: slow down')
     }
   }
+  async loadCollections(_id: string, cursor: string, count: number) {
+    this.collectionRequests.push({ cursor, count })
+    const response = this.collectionPages.shift() ?? page([])
+    if (response instanceof Error) throw response
+    return response
+  }
+  async uncollect(videoId: string) { this.uncollectAttempts.push(videoId) }
   async loadFollowing() { return { accounts: [], hasMore: false } }
   async unfollow() {}
   onWorkspaceCrash(callback: () => void) {
@@ -90,11 +106,54 @@ function createService(client = new MemoryDouyinClient(), coordinator = new Douy
   return { accountSnapshots, client, coordinator, loginSnapshots, service, taskSnapshots }
 }
 
+function createCollectionService(client = new MemoryDouyinClient(), coordinator = new DouyinMutationCoordinator()) {
+  const taskSnapshots: TaskSnapshot[] = []
+  const accountSnapshots: AccountSnapshot[] = []
+  const service = new DouyinTaskService(
+    client,
+    (snapshot) => taskSnapshots.push(snapshot),
+    (snapshot) => accountSnapshots.push(snapshot),
+    () => {},
+    async () => {},
+    coordinator,
+    { kind: 'collections', ownsClient: false },
+  )
+  return { accountSnapshots, client, coordinator, service, taskSnapshots }
+}
+
 async function expectTaskState(service: DouyinTaskService, state: TaskSnapshot['state']) {
   await vi.waitFor(() => expect(service.getTaskSnapshot().state).toBe(state))
 }
 
 describe('Douyin removal task module', () => {
+  test('removes a frozen collection selection through the collection client methods', async () => {
+    const { client, coordinator, service } = createCollectionService()
+    client.user.collectedVideosCount = 2
+    client.collectionPages.push(page(['saved-1', 'saved-2']))
+    await service.scan()
+
+    service.start(['saved-2'])
+    await expectTaskState(service, 'completed')
+
+    expect(client.collectionRequests).toEqual([{ cursor: '0', count: 30 }])
+    expect(client.uncollectAttempts).toEqual(['saved-2'])
+    expect(service.getAccountSnapshot().collectedVideosCount).toBe(1)
+    expect(coordinator.currentOwner()).toBeUndefined()
+  })
+
+  test('uses the live first collection page for an All collection removal', async () => {
+    const { client, service } = createCollectionService()
+    client.user.collectedVideosCount = 2
+    client.collectionPages.push(page(['saved-1', 'saved-2']), page([]))
+    await service.scan()
+
+    await service.startAll()
+    await expectTaskState(service, 'completed')
+
+    expect(client.uncollectAttempts).toEqual(['saved-1', 'saved-2'])
+    expect(client.collectionRequests.every(({ cursor }) => cursor === '0')).toBe(true)
+  })
+
   test('holds the shared mutation lock while running or paused and releases it when stopped', async () => {
     const { client, coordinator, service } = createService()
     client.pages.push(page(['1']))
@@ -117,7 +176,7 @@ describe('Douyin removal task module', () => {
 
     await service.initialize()
     await service.scan()
-    expect(service.getAccountSnapshot()).toMatchObject({ state: 'signedIn', name: 'Sky', likesCount: 8 })
+    expect(service.getAccountSnapshot()).toMatchObject({ state: 'signedIn', name: 'Sky', likedVideosCount: 8 })
     expect(service.getTaskSnapshot()).toMatchObject({ state: 'ready', hasMore: true, counts: { loaded: 2 } })
 
     await service.loadMore()
@@ -141,7 +200,7 @@ describe('Douyin removal task module', () => {
       progress: { completed: 1, total: 1 },
       counts: { loaded: 3, selected: 1, completed: 1, failed: 0 },
     })
-    expect(service.getAccountSnapshot().likesCount).toBe(7)
+    expect(service.getAccountSnapshot().likedVideosCount).toBe(7)
     expect(service.getTaskSnapshot().videos.map(({ id }) => id)).toEqual(['1', '2', '3'])
   })
 
@@ -169,12 +228,12 @@ describe('Douyin removal task module', () => {
       mode: 'limited',
       progress: { completed: 3, total: 3 },
     })
-    expect(service.getAccountSnapshot().likesCount).toBe(5)
+    expect(service.getAccountSnapshot().likedVideosCount).toBe(5)
   })
 
   test('prefetches a 30-row first page at the low watermark without pausing removal', async () => {
     const { client, service } = createService()
-    client.user.likesCount = 50
+    client.user.likedVideosCount = 50
     const initialIds = Array.from({ length: 30 }, (_, index) => String(index + 1))
     const prefetchedIds = Array.from({ length: 30 }, (_, index) => String(index + 21))
     client.pages.push(page(initialIds, '30', true), page(prefetchedIds, '30', true))
@@ -196,7 +255,7 @@ describe('Douyin removal task module', () => {
 
   test('keeps removing loaded rows when a background prefetch fails, then retries in the foreground', async () => {
     const { client, service } = createService()
-    client.user.likesCount = 40
+    client.user.likedVideosCount = 40
     client.pages.push(
       page(Array.from({ length: 30 }, (_, index) => String(index + 1)), '30', true),
       new Error('prefetch unavailable'),
@@ -234,7 +293,7 @@ describe('Douyin removal task module', () => {
 
   test('completes an All scope only after the account is exhausted', async () => {
     const { client, service } = createService()
-    client.user.likesCount = 2
+    client.user.likedVideosCount = 2
     client.pages.push(page(['1', '2']), page([]))
     await service.initialize()
     await service.scan()
@@ -244,7 +303,7 @@ describe('Douyin removal task module', () => {
 
     expect(client.unlikeAttempts).toEqual(['1', '2'])
     expect(service.getTaskSnapshot()).toMatchObject({ mode: 'all', hasMore: false, progress: { completed: 2, total: 2 } })
-    expect(service.getAccountSnapshot().likesCount).toBe(0)
+    expect(service.getAccountSnapshot().likedVideosCount).toBe(0)
     expect(client.favoriteRequests).toHaveLength(3)
   })
 
@@ -288,7 +347,7 @@ describe('Douyin removal task module', () => {
 
   test('pauses All scope when a stale account count never yields another batch', async () => {
     const { client, service } = createService()
-    client.user.likesCount = 4
+    client.user.likedVideosCount = 4
     client.pages.push(page(['1']), page([]), page([]), page([]))
     await service.initialize()
     await service.scan()
@@ -356,6 +415,7 @@ describe('Douyin removal task module', () => {
     const { client, loginSnapshots, service } = createService()
     await service.initialize()
     await service.showLogin()
+    expect(client.refreshed).toBe(true)
     await vi.waitFor(() => expect(loginSnapshots.at(-1)).toEqual(client.login))
     service.hideLogin()
 
@@ -380,4 +440,23 @@ describe('Douyin removal task module', () => {
     expect(client.refreshed).toBe(true)
     service.hideLogin()
   })
+
+  test('coalesces overlapping login setup caused by a remounted renderer effect', async () => {
+    const { client, service } = createService()
+    let finishRefresh: () => void = () => {}
+    const refreshPending = new Promise<void>((resolve) => { finishRefresh = resolve })
+    client.beforeRefreshLogin = () => refreshPending
+    await service.initialize()
+
+    const firstShow = service.showLogin()
+    service.hideLogin()
+    const secondShow = service.showLogin()
+    await vi.waitFor(() => expect(client.refreshLoginCalls).toBeGreaterThan(0))
+    expect(client.refreshLoginCalls).toBe(1)
+
+    finishRefresh()
+    await Promise.all([firstShow, secondShow])
+    service.hideLogin()
+  })
+
 })

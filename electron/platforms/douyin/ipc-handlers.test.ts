@@ -41,12 +41,20 @@ describe('Douyin main-process IPC handlers', () => {
       stop: vi.fn(),
       resetForSignOut: vi.fn(),
     } as unknown as DouyinFollowingTaskService
+    const collection = {
+      getTaskSnapshot: vi.fn(() => ({ state: 'ready', videos: [] })),
+      getAccountSnapshot: vi.fn(() => ({ state: 'signedIn' })),
+      getLoginSnapshot: vi.fn(() => ({ state: 'idle' })),
+      showLogin: vi.fn(), refreshLogin: vi.fn(), hideLogin: vi.fn(), scan: vi.fn(), loadMore: vi.fn(),
+      refreshCompletedList: vi.fn(), start: vi.fn(), startAll: vi.fn(), pause: vi.fn(), resume: vi.fn(), stop: vi.fn(), signOut: vi.fn(), resetForSignOut: vi.fn(),
+    } as unknown as DouyinTaskService
 
-    registerDouyinIpcHandlers(ipc, task, following)
+    registerDouyinIpcHandlers(ipc, task, following, collection)
 
     expect(await handlers.get(DOUYIN_IPC_CHANNELS.getState)?.({})).toEqual({
       task: { state: 'ready' },
       followingTask: { state: 'ready', accounts: [] },
+      collectionTask: { state: 'ready', videos: [] },
       account: { state: 'signedIn' },
       login: { state: 'idle' },
     })
@@ -70,6 +78,11 @@ describe('Douyin main-process IPC handlers', () => {
     await handlers.get(DOUYIN_IPC_CHANNELS.following.pause)?.({})
     await handlers.get(DOUYIN_IPC_CHANNELS.following.resume)?.({}, ['account-2'])
     await handlers.get(DOUYIN_IPC_CHANNELS.following.stop)?.({})
+    await handlers.get(DOUYIN_IPC_CHANNELS.collection.scan)?.({})
+    await handlers.get(DOUYIN_IPC_CHANNELS.collection.start)?.({}, ['video-1'])
+    await handlers.get(DOUYIN_IPC_CHANNELS.collection.startAll)?.({}, 10)
+    await handlers.get(DOUYIN_IPC_CHANNELS.collection.resume)?.({}, ['video-1'])
+    await handlers.get(DOUYIN_IPC_CHANNELS.collection.stop)?.({})
 
     expect(task.showLogin).toHaveBeenCalledOnce()
     expect(task.refreshLogin).toHaveBeenCalledOnce()
@@ -89,5 +102,11 @@ describe('Douyin main-process IPC handlers', () => {
     expect(following.resume).toHaveBeenCalledWith(['account-2'])
     expect(following.stop).toHaveBeenCalledOnce()
     expect(following.resetForSignOut).toHaveBeenCalledOnce()
+    expect(collection.scan).toHaveBeenCalledOnce()
+    expect(collection.start).toHaveBeenCalledWith(['video-1'])
+    expect(collection.startAll).toHaveBeenCalledWith(10)
+    expect(collection.resume).toHaveBeenCalledWith(['video-1'])
+    expect(collection.stop).toHaveBeenCalledOnce()
+    expect(collection.resetForSignOut).toHaveBeenCalledOnce()
   })
 })

@@ -1,6 +1,7 @@
 import type { WebContents } from 'electron'
 
 export const FAVORITES_PAGE_SIZE = 30
+export const COLLECTIONS_PAGE_SIZE = 30
 export const AUTOMATIC_PREFETCH_THRESHOLD = 10
 export const FOLLOWING_PAGE_SIZE = 20
 export const FOLLOWING_PREFETCH_THRESHOLD = 5

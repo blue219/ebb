@@ -30,27 +30,56 @@ const initialFollowingTaskSnapshot: FollowingTaskSnapshot = {
 export function useDouyinBridgeState(loginOpen: boolean) {
   const [task, setTask] = useState(initialTaskSnapshot)
   const [followingTask, setFollowingTask] = useState(initialFollowingTaskSnapshot)
+  const [collectionTask, setCollectionTask] = useState(initialTaskSnapshot)
   const [account, setAccount] = useState<AccountSnapshot>({ state: 'checking' })
   const [login, setLogin] = useState<LoginSnapshot>({ state: 'idle' })
 
   useEffect(() => {
-    const stopTask = window.ebb.douyin.onStatus(setTask)
-    const stopAccount = window.ebb.douyin.onAccount(setAccount)
-    const stopLogin = window.ebb.douyin.onLogin(setLogin)
-    const stopFollowingTask = window.ebb.douyin.following.onStatus(setFollowingTask)
+    let active = true
+    const received = { account: false, collectionTask: false, followingTask: false, login: false, task: false }
+    const stopTask = window.ebb.douyin.onStatus((snapshot) => {
+      if (!active) return
+      received.task = true
+      setTask(snapshot)
+    })
+    const stopAccount = window.ebb.douyin.onAccount((snapshot) => {
+      if (!active) return
+      received.account = true
+      setAccount(snapshot)
+    })
+    const stopLogin = window.ebb.douyin.onLogin((snapshot) => {
+      if (!active) return
+      received.login = true
+      setLogin(snapshot)
+    })
+    const stopFollowingTask = window.ebb.douyin.following.onStatus((snapshot) => {
+      if (!active) return
+      received.followingTask = true
+      setFollowingTask(snapshot)
+    })
+    const stopCollectionTask = window.ebb.douyin.collection.onStatus((snapshot) => {
+      if (!active) return
+      received.collectionTask = true
+      setCollectionTask(snapshot)
+    })
 
     void window.ebb.douyin.getState().then((state) => {
-      setTask(state.task)
-      setFollowingTask(state.followingTask)
-      setAccount(state.account)
-      setLogin(state.login)
+      if (!active) return
+      // Events published after getState was invoked are newer than its returned snapshot.
+      if (!received.task) setTask(state.task)
+      if (!received.followingTask) setFollowingTask(state.followingTask)
+      if (!received.collectionTask) setCollectionTask(state.collectionTask)
+      if (!received.account) setAccount(state.account)
+      if (!received.login) setLogin(state.login)
     })
 
     return () => {
+      active = false
       stopTask()
       stopAccount()
       stopLogin()
       stopFollowingTask()
+      stopCollectionTask()
     }
   }, [])
 
@@ -69,5 +98,5 @@ export function useDouyinBridgeState(loginOpen: boolean) {
     }
   }, [loginOpen])
 
-  return { account, followingTask, login, setTask, task }
+  return { account, collectionTask, followingTask, login, setCollectionTask, setTask, task }
 }

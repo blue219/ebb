@@ -15,6 +15,7 @@ dist-ssr
 coverage
 test-results
 playwright-report
+.playwright-cli
 *.local
 
 # Editor directories and files

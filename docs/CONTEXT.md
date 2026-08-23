@@ -1,12 +1,12 @@
 # Domain language
 
-Ebb helps a signed-in person define and execute batch changes for liked videos and followed accounts on their Douyin account. Use these terms consistently in product copy, documentation, and code discussions.
+Ebb helps a signed-in person define and execute batch changes for liked videos, collected videos, and followed accounts on a supported platform account. Use these terms consistently in product copy, documentation, and code discussions.
 
 ## Batch scopes
 
 **Batch scope**
 
-The boundary that determines which liked videos or following accounts one batch task may change.
+The boundary that determines which liked videos, collected videos, or following accounts one batch task may change.
 
 _Avoid_: clear scope, selection mode, delete mode
 
@@ -38,9 +38,13 @@ One confirmed attempt to remove the likes defined by a batch scope. Internally, 
 
 One confirmed attempt to unfollow the accounts defined by a batch scope. Mutual follows remain eligible because they are following accounts.
 
+**Collection-removal task**
+
+One confirmed attempt to cancel the overall collection status of videos defined by a batch scope. It does not target an individual collection folder.
+
 **Pause**
 
-Stop sending further unlike or unfollow requests while retaining task progress and the global batch-task lock. A request already in flight may finish before the pause takes effect.
+Stop sending further unlike, uncollect, or unfollow requests while retaining task progress and the global batch-task lock. A request already in flight may finish before the pause takes effect.
 
 **Continue**
 
@@ -48,7 +52,7 @@ Resume a paused batch task from its retained progress and boundary.
 
 **Stop**
 
-End the current batch task without processing its remaining items. Completed unlike or unfollow requests remain applied to the account.
+End the current batch task without processing its remaining items. Completed unlike, uncollect, or unfollow requests remain applied to the account.
 
 **Sign out**
 
@@ -56,9 +60,9 @@ Stop active work, release the global batch-task lock, clear Ebb's persistent Dou
 
 ## Data terms
 
-**Likes count**
+**Liked videos count**
 
-The account total reported by Douyin. It sets the initial total for **All** and validates a **Limited** scope, but it can become stale if the account changes elsewhere.
+The total number of videos the signed-in person has liked, when the platform reports it. It sets the initial total for **All** and validates a **Limited** scope, but it can become stale if the account changes elsewhere. TikTok's public `likes_count` means likes received by the person's own videos and must never be used for this value.
 
 **Following account**
 
@@ -72,9 +76,17 @@ A following account that also follows the signed-in person. It remains part of e
 
 _Avoid_: friend
 
+**Unknown total**
+
+A platform state where the account does not report the total size of a removable collection. **All** remains available and reports the number processed so far. A **Limited** scope accepts any positive whole number and completes early when the platform returns no more items.
+
 **Following count**
 
 The account total reported by Douyin. It sets the initial total for an unfollow **All** scope and validates a **Limited** scope, but it can become stale if the account changes elsewhere.
+
+**Collections count**
+
+The account total reported by Douyin. It sets the initial total for a collection-removal **All** scope and validates a **Limited** scope, but it can become stale if the account changes elsewhere.
 
 **Loaded videos**
 
@@ -90,4 +102,4 @@ Liked-video rows kept privately in memory after a background page request. They 
 
 **Completed**
 
-The unlike or unfollow request for an item succeeded during the current app run. It does not mean a video was deleted or that Ebb can restore the previous relationship.
+The unlike, uncollect, or unfollow request for an item succeeded during the current app run. It does not mean a video was deleted or that Ebb can restore the previous relationship.

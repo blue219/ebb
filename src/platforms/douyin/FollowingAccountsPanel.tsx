@@ -46,16 +46,16 @@ const FollowingAccountCard = memo(function FollowingAccountCard({
   onToggle: (id: string) => void
   onDismiss: (id: string) => void
 }) {
-  const identifier = item.uniqueId ? `@${item.uniqueId}` : `ID ${item.secUserId.slice(0, 10)}…`
+  const identifier = item.username ? `@${item.username}` : `ID ${item.id.slice(0, 10)}…`
   const relationshipLabel = item.relation === 'mutual' ? mutualLabel : followingLabel
-  return <label className={`following-account-card ${selected ? 'is-selected' : ''} ${item.status === 'completed' ? 'video-row-removing' : ''}`} onAnimationEnd={() => item.status === 'completed' && onDismiss(item.secUserId)}>
+  return <label className={`following-account-card ${selected ? 'is-selected' : ''} ${item.status === 'completed' ? 'video-row-removing' : ''}`} onAnimationEnd={() => item.status === 'completed' && onDismiss(item.id)}>
     {item.avatar
       ? <img className="absolute inset-0 size-full object-cover" src={item.avatar} alt="" loading="lazy" decoding="async" />
       : <div className="absolute inset-0 grid place-items-center bg-gradient-to-br from-zinc-100 via-zinc-200 to-zinc-300"><Icon name="users" className="size-9 text-zinc-400" /></div>}
     <span className="absolute inset-0 bg-gradient-to-t from-zinc-950/90 via-zinc-950/20 to-zinc-950/10" aria-hidden="true" />
-    <input aria-label={item.nickname} className="video-cover-checkbox" type="checkbox" checked={selected} disabled={taskLocked || item.status === 'completed'} onChange={() => onToggle(item.secUserId)} />
+    <input aria-label={item.displayName} className="video-cover-checkbox" type="checkbox" checked={selected} disabled={taskLocked || item.status === 'completed'} onChange={() => onToggle(item.id)} />
     <span className={`following-relation ${item.relation === 'mutual' ? 'is-mutual' : ''}`}>{relationshipLabel}</span>
-    <span className="following-account-details"><span className="truncate text-sm font-semibold tracking-[-0.01em]">{item.nickname}</span><span className="truncate text-[11px] text-white/72" title={identifier}>{identifier}</span></span>
+    <span className="following-account-details"><span className="truncate text-sm font-semibold tracking-[-0.01em]">{item.displayName}</span><span className="truncate text-[11px] text-white/72" title={identifier}>{identifier}</span></span>
     {item.status === 'processing' && <span className="following-account-status" aria-label="Processing"><Icon name="loader" className="size-4 animate-spin" /></span>}
     {item.status === 'failed' && <span className="following-account-status is-failed" aria-label="Paused"><Icon name="warning" className="size-4" /></span>}
   </label>
@@ -79,15 +79,15 @@ export function FollowingAccountsPanel({ account, locale, snapshot }: Props) {
   const isTaskLocked = ['running', 'paused', 'scanning'].includes(snapshot.state)
   const totalFollowing = account.followingCount ?? snapshot.counts.loaded
   const visibleAccounts = useMemo(
-    () => snapshot.accounts.filter((item) => !dismissedIds.has(item.secUserId)),
+    () => snapshot.accounts.filter((item) => !dismissedIds.has(item.id)),
     [dismissedIds, snapshot.accounts],
   )
   const selectableAccounts = useMemo(
-    () => visibleAccounts.map((item) => ({ id: item.secUserId, status: item.status })),
+    () => visibleAccounts.map((item) => ({ id: item.id, status: item.status })),
     [visibleAccounts],
   )
   const manualIds = useMemo(
-    () => visibleAccounts.filter((item) => selectedIds.has(item.secUserId)).map((item) => item.secUserId),
+    () => visibleAccounts.filter((item) => selectedIds.has(item.id)).map((item) => item.id),
     [selectedIds, visibleAccounts],
   )
   const effectiveSelectedIds = useMemo(
@@ -206,7 +206,7 @@ export function FollowingAccountsPanel({ account, locale, snapshot }: Props) {
     <span className="sr-only" role="status">{t.followingTaskStates[snapshot.state]}</span>
     <span className="sr-only" role="status">{commandError ?? snapshot.message ?? t.privacy}</span>
 
-    {visibleAccounts.length ? <div ref={scrollRef} className="table-scroll min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto pb-28" onScroll={handleScroll}><div className="following-account-grid">{visibleAccounts.map((item) => <FollowingAccountCard key={item.secUserId} item={item} selected={effectiveSelectedIds.has(item.secUserId)} taskLocked={isTaskLocked} mutualLabel={t.mutual} followingLabel={t.followingOnly} onToggle={toggle} onDismiss={dismiss} />)}</div><div className="flex h-10 items-center px-4 text-[11px] text-zinc-500">{snapshot.isLoadingMore || snapshot.isRefreshingCompletedList ? <span className="flex items-center gap-2"><Icon name="loader" className="size-3.5 animate-spin" /> {snapshot.isRefreshingCompletedList ? t.refreshingCompletedFollowingList : t.loadingMoreFollowing}</span> : !snapshot.hasMore && <span className="flex items-center gap-2"><Icon name="check" className="size-3.5 text-emerald-600" /> {t.allFollowingLoaded}</span>}</div></div> : snapshot.isRefreshingCompletedList ? <div className="grid flex-1 place-items-center px-6 py-14 text-center"><div><Icon name="loader" className="mx-auto size-7 animate-spin text-zinc-400" /><h2 className="mt-4 text-base font-semibold">{t.refreshingCompletedFollowingList}</h2></div></div> : snapshot.completionRefreshError ? <div className="grid flex-1 place-items-center px-6 py-14 text-center"><div><Icon name="warning" className="mx-auto size-6 text-red-600" /><h2 className="mt-4 text-base font-semibold">{t.refreshCompletedFollowingListFailed}</h2><p className="mt-1 max-w-xs text-sm leading-5 text-zinc-500">{snapshot.completionRefreshError}</p><Button variant="outline" className="mt-4 rounded-xl border-zinc-200 bg-white/70 text-xs" disabled={busy} onClick={() => void run(() => window.ebb.douyin.following.refreshCompletedList())}><Icon name="refresh" className="size-4" /> {t.retryRefresh}</Button></div></div> : <div className="grid flex-1 place-items-center px-6 py-14 text-center"><div><div className="mx-auto flex size-11 items-center justify-center rounded-2xl bg-zinc-100"><Icon name="users" className="size-5 text-zinc-500" /></div><h2 className="mt-4 text-base font-semibold">{t.emptyFollowingTitle}</h2><p className="mt-1 max-w-xs text-sm leading-5 text-zinc-500">{t.emptyFollowingBody}</p></div></div>}
+    {visibleAccounts.length ? <div ref={scrollRef} className="table-scroll min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto pb-28" onScroll={handleScroll}><div className="following-account-grid">{visibleAccounts.map((item) => <FollowingAccountCard key={item.id} item={item} selected={effectiveSelectedIds.has(item.id)} taskLocked={isTaskLocked} mutualLabel={t.mutual} followingLabel={t.followingOnly} onToggle={toggle} onDismiss={dismiss} />)}</div><div className="flex h-10 items-center px-4 text-[11px] text-zinc-500">{snapshot.isLoadingMore || snapshot.isRefreshingCompletedList ? <span className="flex items-center gap-2"><Icon name="loader" className="size-3.5 animate-spin" /> {snapshot.isRefreshingCompletedList ? t.refreshingCompletedFollowingList : t.loadingMoreFollowing}</span> : !snapshot.hasMore && <span className="flex items-center gap-2"><Icon name="check" className="size-3.5 text-emerald-600" /> {t.allFollowingLoaded}</span>}</div></div> : snapshot.isRefreshingCompletedList ? <div className="grid flex-1 place-items-center px-6 py-14 text-center"><div><Icon name="loader" className="mx-auto size-7 animate-spin text-zinc-400" /><h2 className="mt-4 text-base font-semibold">{t.refreshingCompletedFollowingList}</h2></div></div> : snapshot.completionRefreshError ? <div className="grid flex-1 place-items-center px-6 py-14 text-center"><div><Icon name="warning" className="mx-auto size-6 text-red-600" /><h2 className="mt-4 text-base font-semibold">{t.refreshCompletedFollowingListFailed}</h2><p className="mt-1 max-w-xs text-sm leading-5 text-zinc-500">{snapshot.completionRefreshError}</p><Button variant="outline" className="mt-4 rounded-xl border-zinc-200 bg-white/70 text-xs" disabled={busy} onClick={() => void run(() => window.ebb.douyin.following.refreshCompletedList())}><Icon name="refresh" className="size-4" /> {t.retryRefresh}</Button></div></div> : <div className="grid flex-1 place-items-center px-6 py-14 text-center"><div><div className="mx-auto flex size-11 items-center justify-center rounded-2xl bg-zinc-100"><Icon name="users" className="size-5 text-zinc-500" /></div><h2 className="mt-4 text-base font-semibold">{t.emptyFollowingTitle}</h2><p className="mt-1 max-w-xs text-sm leading-5 text-zinc-500">{t.emptyFollowingBody}</p></div></div>}
 
     <div className="floating-action-bar">
       <span className="px-2 text-sm font-medium text-zinc-600">{t.selected} {formatCount(activeCount)}</span>

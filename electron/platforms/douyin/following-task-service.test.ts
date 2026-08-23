@@ -16,9 +16,9 @@ import { DouyinFollowingTaskService, type DouyinAccountContext } from './followi
 import { DouyinMutationCoordinator } from './mutation-coordinator.ts'
 
 const account = (id: string, relation: FollowingAccount['relation'] = 'following'): FollowingAccount => ({
-  secUserId: id,
-  nickname: `Account ${id}`,
-  uniqueId: `douyin-${id}`,
+  id: id,
+  displayName: `Account ${id}`,
+  username: `douyin-${id}`,
   relation,
   status: 'pending',
 })
@@ -30,12 +30,12 @@ const followingPage = (ids: string[], nextCursor?: string, hasMore = false): Dou
 })
 
 class MemoryDouyinClient implements DouyinClient {
-  user: DouyinCurrentUser = { secUserId: 'self', name: 'Sky', followingCount: 4 }
+  user: DouyinCurrentUser = { id: 'self', name: 'Sky', followingCount: 4 }
   pages: Array<DouyinFollowingPage | Error> = []
   followingRequests: Array<{ cursor: string, count: number }> = []
   unfollowAttempts: string[] = []
   unfollowFailures = new Map<string, number>()
-  beforeUnfollow?: (secUserId: string) => Promise<void>
+  beforeUnfollow?: (id: string) => Promise<void>
 
   async initialize() {}
   dispose() {}
@@ -46,21 +46,23 @@ class MemoryDouyinClient implements DouyinClient {
   async readLoginSurface(): Promise<LoginSnapshot> { return { state: 'idle' } }
   async loadFavorites(): Promise<DouyinFavoritePage> { return { videos: [], hasMore: false } }
   async unlike() {}
-  async loadFollowing(_secUserId: string, cursor: string, count: number) {
+  async loadFollowing(_id: string, cursor: string, count: number) {
     this.followingRequests.push({ cursor, count })
     const response = this.pages.shift() ?? followingPage([])
     if (response instanceof Error) throw response
     return response
   }
-  async unfollow(secUserId: string) {
-    this.unfollowAttempts.push(secUserId)
-    await this.beforeUnfollow?.(secUserId)
-    const failures = this.unfollowFailures.get(secUserId) ?? 0
+  async unfollow(id: string) {
+    this.unfollowAttempts.push(id)
+    await this.beforeUnfollow?.(id)
+    const failures = this.unfollowFailures.get(id) ?? 0
     if (failures > 0) {
-      this.unfollowFailures.set(secUserId, failures - 1)
+      this.unfollowFailures.set(id, failures - 1)
       throw new Error('Douyin API request was rejected: slow down')
     }
   }
+  async loadCollections() { return { videos: [], hasMore: false } }
+  async uncollect() {}
   onWorkspaceCrash() { return () => {} }
 }
 
@@ -75,7 +77,7 @@ function createService(followingCount = 4) {
   }
   const accountContext: DouyinAccountContext = {
     getSnapshot: () => ({ ...accountSnapshot }),
-    requireSignedInUserId: async () => client.user.secUserId,
+    requireSignedInUserId: async () => client.user.id,
     decrementFollowingCount: () => {
       if (accountSnapshot.followingCount !== undefined && accountSnapshot.followingCount > 0) {
         accountSnapshot = { ...accountSnapshot, followingCount: accountSnapshot.followingCount - 1 }
@@ -106,7 +108,7 @@ describe('Douyin following task module', () => {
     await service.loadMore()
 
     expect(service.getSnapshot()).toMatchObject({ state: 'ready', counts: { loaded: 3 }, hasMore: false })
-    expect(service.getSnapshot().accounts.map(({ secUserId }) => secUserId)).toEqual(['1', '2', '3'])
+    expect(service.getSnapshot().accounts.map(({ id }) => id)).toEqual(['1', '2', '3'])
     expect(client.followingRequests).toEqual([{ cursor: '0', count: 20 }, { cursor: '10', count: 20 }])
   })
 
@@ -210,7 +212,7 @@ describe('Douyin following task module', () => {
 
     await service.refreshCompletedList()
     expect(service.getSnapshot()).toMatchObject({ state: 'completed', completionRefreshError: undefined })
-    expect(service.getSnapshot().accounts.map((item) => item.secUserId)).toEqual(['2'])
+    expect(service.getSnapshot().accounts.map((item) => item.id)).toEqual(['2'])
   })
 
   test('pause and stop wait for an in-flight unfollow before preventing later requests', async () => {

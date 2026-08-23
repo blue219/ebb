@@ -31,8 +31,8 @@ const readyTask = (overrides: Partial<TaskSnapshot> = {}): TaskSnapshot => ({
 const readyFollowingTask = (overrides: Partial<FollowingTaskSnapshot> = {}): FollowingTaskSnapshot => ({
   state: 'ready',
   accounts: [
-    { secUserId: 'account-1', nickname: 'First account', uniqueId: 'first-id', relation: 'mutual', status: 'pending' },
-    { secUserId: 'account-2', nickname: 'Second account', relation: 'following', status: 'pending' },
+    { id: 'account-1', displayName: 'First account', username: 'first-id', relation: 'mutual', status: 'pending' },
+    { id: 'account-2', displayName: 'Second account', relation: 'following', status: 'pending' },
   ],
   counts: { loaded: 2, selected: 0, completed: 0, failed: 0 },
   progress: { completed: 0, total: 0 },
@@ -42,10 +42,15 @@ const readyFollowingTask = (overrides: Partial<FollowingTaskSnapshot> = {}): Fol
   ...overrides,
 })
 
-function createBridge(initialState: Omit<DouyinStateSnapshot, 'followingTask'> & { followingTask?: FollowingTaskSnapshot }) {
-  const initial: DouyinStateSnapshot = { ...initialState, followingTask: initialState.followingTask ?? readyFollowingTask({ state: 'idle', accounts: [], counts: { loaded: 0, selected: 0, completed: 0, failed: 0 } }) }
+function createBridge(initialState: Omit<DouyinStateSnapshot, 'followingTask' | 'collectionTask'> & { followingTask?: FollowingTaskSnapshot, collectionTask?: TaskSnapshot }) {
+  const initial: DouyinStateSnapshot = {
+    ...initialState,
+    followingTask: initialState.followingTask ?? readyFollowingTask({ state: 'idle', accounts: [], counts: { loaded: 0, selected: 0, completed: 0, failed: 0 } }),
+    collectionTask: initialState.collectionTask ?? readyTask({ state: 'idle', videos: [], counts: { loaded: 0, selected: 0, completed: 0, failed: 0 } }),
+  }
   let statusListener = (_snapshot: TaskSnapshot) => {}
   let followingStatusListener = (_snapshot: FollowingTaskSnapshot) => {}
+  let collectionStatusListener = (_snapshot: TaskSnapshot) => {}
   let accountListener = (_snapshot: AccountSnapshot) => {}
   let loginListener = (_snapshot: LoginSnapshot) => {}
   const bridge: DouyinBridge = {
@@ -76,6 +81,17 @@ function createBridge(initialState: Omit<DouyinStateSnapshot, 'followingTask'> &
       stop: vi.fn().mockResolvedValue(undefined),
       onStatus: vi.fn((callback) => { followingStatusListener = callback; return () => {} }),
     },
+    collection: {
+      scan: vi.fn().mockResolvedValue(undefined),
+      loadMore: vi.fn().mockResolvedValue(undefined),
+      refreshCompletedList: vi.fn().mockResolvedValue(undefined),
+      start: vi.fn().mockResolvedValue(undefined),
+      startAll: vi.fn().mockResolvedValue(undefined),
+      pause: vi.fn().mockResolvedValue(undefined),
+      resume: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn().mockResolvedValue(undefined),
+      onStatus: vi.fn((callback) => { collectionStatusListener = callback; return () => {} }),
+    },
   }
   return {
     bridge,
@@ -83,10 +99,11 @@ function createBridge(initialState: Omit<DouyinStateSnapshot, 'followingTask'> &
     emitLogin(snapshot: LoginSnapshot) { act(() => loginListener(snapshot)) },
     emitStatus(snapshot: TaskSnapshot) { act(() => statusListener(snapshot)) },
     emitFollowingStatus(snapshot: FollowingTaskSnapshot) { act(() => followingStatusListener(snapshot)) },
+    emitCollectionStatus(snapshot: TaskSnapshot) { act(() => collectionStatusListener(snapshot)) },
   }
 }
 
-const signedInAccount: AccountSnapshot = { state: 'signedIn', name: 'Sky', likesCount: 2, followingCount: 2 }
+const signedInAccount: AccountSnapshot = { state: 'signedIn', name: 'Sky', likedVideosCount: 2, followingCount: 2, collectedVideosCount: 2 }
 
 describe('Douyin workspace user flows', () => {
   beforeEach(() => localStorage.clear())
@@ -155,7 +172,7 @@ describe('Douyin workspace user flows', () => {
   })
 
   test('shows a QR code and scans once after sign-in succeeds', async () => {
-    const state: Omit<DouyinStateSnapshot, 'followingTask'> = {
+    const state: Omit<DouyinStateSnapshot, 'followingTask' | 'collectionTask'> = {
       task: readyTask({ state: 'idle', videos: [], counts: { loaded: 0, selected: 0, completed: 0, failed: 0 } }),
       account: { state: 'signedOut' },
       login: { state: 'ready', qrCode: 'data:image/png;base64,aA==' },
@@ -172,6 +189,30 @@ describe('Douyin workspace user flows', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Sign in to Douyin' })).not.toBeInTheDocument())
     expect(harness.bridge.scan).toHaveBeenCalledOnce()
     expect(localStorage.getItem('ebb:saved-douyin-session')).toBe('true')
+  })
+
+  test('does not let a stale initial snapshot overwrite a newer signed-in event', async () => {
+    const staleState: DouyinStateSnapshot = {
+      task: readyTask({ state: 'idle', videos: [], counts: { loaded: 0, selected: 0, completed: 0, failed: 0 } }),
+      followingTask: readyFollowingTask({ state: 'idle', accounts: [], counts: { loaded: 0, selected: 0, completed: 0, failed: 0 } }),
+      collectionTask: readyTask({ state: 'idle', videos: [], counts: { loaded: 0, selected: 0, completed: 0, failed: 0 } }),
+      account: { state: 'signedOut' },
+      login: { state: 'loading' },
+    }
+    let resolveInitialState: (state: DouyinStateSnapshot) => void = () => {}
+    const initialState = new Promise<DouyinStateSnapshot>((resolve) => { resolveInitialState = resolve })
+    const harness = createBridge(staleState)
+    harness.bridge.getState = vi.fn(() => initialState)
+    window.ebb = { platform: 'win32', douyin: harness.bridge }
+
+    render(<DouyinWorkspace />)
+    harness.emitAccount(signedInAccount)
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Sign in to Douyin' })).not.toBeInTheDocument())
+
+    resolveInitialState(staleState)
+    await act(async () => { await initialState })
+    expect(screen.queryByRole('dialog', { name: 'Sign in to Douyin' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument()
   })
 
   test('keeps the signed-out sidebar compact while retaining an accessible sign-in control', async () => {
@@ -309,5 +350,45 @@ describe('Douyin workspace user flows', () => {
     })
     expect(harness.bridge.loadMore).toHaveBeenCalledOnce()
     finishLoad()
+  })
+
+  test('loads collected videos lazily and freezes a manual uncollect selection', async () => {
+    localStorage.setItem('ebb:saved-douyin-session', 'true')
+    const harness = createBridge({
+      task: readyTask(),
+      collectionTask: readyTask({ state: 'idle', videos: [], counts: { loaded: 0, selected: 0, completed: 0, failed: 0 } }),
+      account: signedInAccount,
+      login: { state: 'idle' },
+    })
+    window.ebb = { platform: 'win32', douyin: harness.bridge }
+    const user = userEvent.setup()
+    render(<DouyinWorkspace />)
+
+    await user.click(await screen.findByRole('button', { name: 'Collected videos' }))
+    expect(harness.bridge.collection.scan).toHaveBeenCalledOnce()
+    harness.emitCollectionStatus(readyTask({ videos: [
+      { id: 'saved-1', title: 'Saved video', status: 'pending' },
+      { id: 'saved-2', title: 'Second saved video', status: 'pending' },
+    ] }))
+    await user.click(await screen.findByRole('checkbox', { name: 'Saved video' }))
+    await user.click(screen.getByRole('button', { name: 'Remove 1 collected videos' }))
+    expect(screen.getByRole('dialog', { name: 'Remove 1 collected videos?' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Remove from collections' }))
+    expect(harness.bridge.collection.start).toHaveBeenCalledWith(['saved-2'])
+  })
+
+  test('locks all workspace switches while a collection task is paused', async () => {
+    localStorage.setItem('ebb:saved-douyin-session', 'true')
+    const harness = createBridge({
+      task: readyTask(),
+      collectionTask: readyTask({ state: 'paused', mode: 'limited', progress: { completed: 0, total: 1 } }),
+      account: signedInAccount,
+      login: { state: 'idle' },
+    })
+    window.ebb = { platform: 'win32', douyin: harness.bridge }
+    render(<DouyinWorkspace />)
+
+    expect(await screen.findByRole('button', { name: 'Following accounts' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Collected videos' })).toBeDisabled()
   })
 })

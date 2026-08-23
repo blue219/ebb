@@ -17,17 +17,19 @@ describe('untrusted Douyin responses', () => {
       data: {
         user_info: {
           sec_uid: 'account-1',
-          nickname: 'Sky',
+          displayName: 'Sky',
           favoriting_count: '42',
           following_count: '17',
+          collect_count: '9',
           avatar_thumb: { url_list: [null, 'https://example.test/avatar.jpg'] },
         },
       },
     })).toEqual({
-      secUserId: 'account-1',
+      id: 'account-1',
       name: 'Sky',
-      likesCount: 42,
+      likedVideosCount: 42,
       followingCount: 17,
+      collectedVideosCount: 9,
       avatar: 'https://example.test/avatar.jpg',
     })
   })
@@ -41,28 +43,28 @@ describe('untrusted Douyin responses', () => {
       followings: [
         {
           sec_uid: 'secure-1',
-          nickname: 'First account',
+          displayName: 'First account',
           unique_id: 'first-id',
           follower_status: 1,
           avatar_thumb: { url_list: ['https://example.test/first.jpg'] },
         },
-        { sec_uid: 'secure-2', nickname: '', unique_id: '' },
-        { nickname: 'Missing stable ID' },
+        { sec_uid: 'secure-2', displayName: '', unique_id: '' },
+        { displayName: 'Missing stable ID' },
       ],
     }, '100')).toEqual({
       accounts: [
         {
-          secUserId: 'secure-1',
-          nickname: 'First account',
-          uniqueId: 'first-id',
+          id: 'secure-1',
+          displayName: 'First account',
+          username: 'first-id',
           avatar: 'https://example.test/first.jpg',
           relation: 'mutual',
           status: 'pending',
         },
         {
-          secUserId: 'secure-2',
-          nickname: 'Douyin account',
-          uniqueId: undefined,
+          id: 'secure-2',
+          displayName: 'Douyin account',
+          username: undefined,
           avatar: undefined,
           relation: 'following',
           status: 'pending',
@@ -101,6 +103,9 @@ describe('untrusted Douyin responses', () => {
     })
 
     expect(parseFavoritePage({ has_more: 1, max_cursor: '10', aweme_list: [] }, '10').hasMore).toBe(false)
+    expect(parseFavoritePage({ has_more: 1, cursor: '11', aweme_list: [{ aweme_id: '103', desc: 'Saved' }] }, '10')).toMatchObject({
+      nextCursor: '11', hasMore: true, videos: [{ id: '103' }],
+    })
   })
 
   test('normalizes non-JSON and unreadable browser responses', () => {

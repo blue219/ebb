@@ -54,5 +54,20 @@ export function createDouyinBridge(ipcRenderer: IpcRenderer): DouyinBridge {
         return () => ipcRenderer.removeListener(DOUYIN_IPC_CHANNELS.following.status, listener)
       },
     },
+    collection: {
+      scan: () => ipcRenderer.invoke(DOUYIN_IPC_CHANNELS.collection.scan),
+      loadMore: () => ipcRenderer.invoke(DOUYIN_IPC_CHANNELS.collection.loadMore),
+      refreshCompletedList: () => ipcRenderer.invoke(DOUYIN_IPC_CHANNELS.collection.refreshCompletedList),
+      start: (selectedIds: string[]) => ipcRenderer.invoke(DOUYIN_IPC_CHANNELS.collection.start, selectedIds),
+      startAll: (limit?: number) => ipcRenderer.invoke(DOUYIN_IPC_CHANNELS.collection.startAll, limit),
+      pause: () => ipcRenderer.invoke(DOUYIN_IPC_CHANNELS.collection.pause),
+      resume: (selectedIds: string[]) => ipcRenderer.invoke(DOUYIN_IPC_CHANNELS.collection.resume, selectedIds),
+      stop: () => ipcRenderer.invoke(DOUYIN_IPC_CHANNELS.collection.stop),
+      onStatus: (callback: (snapshot: TaskSnapshot) => void) => {
+        const listener = (_event: Electron.IpcRendererEvent, snapshot: TaskSnapshot) => callback(snapshot)
+        ipcRenderer.on(DOUYIN_IPC_CHANNELS.collection.status, listener)
+        return () => ipcRenderer.removeListener(DOUYIN_IPC_CHANNELS.collection.status, listener)
+      },
+    },
   }
 }

@@ -15,6 +15,7 @@ import type {
 import { copy, type Locale } from './i18n'
 import { Icon } from './icons'
 import { FollowingAccountsPanel } from './FollowingAccountsPanel'
+import { CollectedVideosPanel } from './CollectedVideosPanel'
 import { useDouyinBridgeState } from './useDouyinBridgeState'
 import { VideoRow } from './VideoRow'
 
@@ -27,7 +28,7 @@ type PendingClear =
 
 function DouyinWorkspace() {
   const [locale, setLocale] = useState<Locale>('en')
-  const [activeWorkspace, setActiveWorkspace] = useState<'likes' | 'following'>('likes')
+  const [activeWorkspace, setActiveWorkspace] = useState<'likes' | 'following' | 'collections'>('likes')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [clearScope, setClearScope] = useState<BatchScope>(DEFAULT_BATCH_SCOPE)
   const [scopeInput, setScopeInput] = useState('All')
@@ -36,13 +37,14 @@ function DouyinWorkspace() {
   const [completedControlDismissed, setCompletedControlDismissed] = useState(false)
   // This boolean contains no credentials; it only prevents a sign-in flash during session restoration.
   const [loginOpen, setLoginOpen] = useState(() => localStorage.getItem(SAVED_DOUYIN_SESSION_KEY) !== 'true')
-  const { account, followingTask: followingSnapshot, login, setTask: setSnapshot, task: snapshot } = useDouyinBridgeState(loginOpen)
+  const { account, collectionTask: collectionSnapshot, followingTask: followingSnapshot, login, setTask: setSnapshot, task: snapshot } = useDouyinBridgeState(loginOpen)
   const [busy, setBusy] = useState(false)
   const [dismissedVideoIds, setDismissedVideoIds] = useState<Set<string>>(new Set())
   const loadMorePendingRef = useRef(false)
   const loadMoreArmedRef = useRef(true)
   const autoScanStartedRef = useRef(false)
   const followingScanStartedRef = useRef(false)
+  const collectionScanStartedRef = useRef(false)
   const videoScrollRef = useRef<HTMLDivElement>(null)
   const scopeControlRef = useRef<HTMLDivElement>(null)
   const completedDismissTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
@@ -63,7 +65,7 @@ function DouyinWorkspace() {
   }, [dismissedVideoIds, selectedIds, snapshot.videos])
   const selectionContextRef = useRef({ clearScope, visibleVideos, taskState: snapshot.state, customLabel: t.custom })
   selectionContextRef.current = { clearScope, visibleVideos, taskState: snapshot.state, customLabel: t.custom }
-  const totalLikes = Math.max(0, account.likesCount ?? loadedPendingCount)
+  const totalLikes = Math.max(0, account.likedVideosCount ?? loadedPendingCount)
   const effectiveSelectedIds = useMemo(
     () => getScopeSelectedIds(clearScope, visibleVideos, selectedIds),
     [clearScope, selectedIds, visibleVideos],
@@ -73,6 +75,7 @@ function DouyinWorkspace() {
   const isTaskLocked = isTaskActive || snapshot.state === 'paused'
   const isWorkspaceSwitchLocked = ['running', 'paused'].includes(snapshot.state)
     || ['running', 'paused'].includes(followingSnapshot.state)
+    || ['running', 'paused'].includes(collectionSnapshot.state)
   const isRemovalControlVisible = snapshot.progress.total > 0
     && ['running', 'paused', 'completed'].includes(snapshot.state)
     && (snapshot.state !== 'completed' || !completedControlDismissed)
@@ -80,14 +83,11 @@ function DouyinWorkspace() {
   const completedInCurrentRun = Math.min(snapshot.progress.total, snapshot.progress.completed)
   const removalPercent = snapshot.progress.total ? Math.round((completedInCurrentRun / snapshot.progress.total) * 100) : 0
   const isSignedIn = account.state === 'signedIn'
-  const likesDisplay = account.likesCount?.toLocaleString()
+  const likesDisplay = account.likedVideosCount?.toLocaleString()
     ?? (snapshot.state === 'scanning' ? '…' : `${snapshot.counts.loaded}${snapshot.hasMore ? '+' : ''}`)
-  const isWorkspaceRefreshing = activeWorkspace === 'likes'
-    ? snapshot.state === 'scanning'
-    : followingSnapshot.state === 'scanning'
-  const isWorkspaceRefreshDisabled = activeWorkspace === 'likes'
-    ? !isSignedIn || busy || snapshot.state === 'running' || snapshot.state === 'paused' || snapshot.state === 'scanning' || snapshot.isLoadingMore || snapshot.isRefreshingCompletedList
-    : !isSignedIn || busy || ['running', 'paused', 'scanning'].includes(followingSnapshot.state) || followingSnapshot.isLoadingMore || followingSnapshot.isRefreshingCompletedList
+  const activeTaskSnapshot = activeWorkspace === 'likes' ? snapshot : activeWorkspace === 'following' ? followingSnapshot : collectionSnapshot
+  const isWorkspaceRefreshing = activeTaskSnapshot.state === 'scanning'
+  const isWorkspaceRefreshDisabled = !isSignedIn || busy || ['running', 'paused', 'scanning'].includes(activeTaskSnapshot.state) || activeTaskSnapshot.isLoadingMore || activeTaskSnapshot.isRefreshingCompletedList
   const run = useCallback(async (action: () => Promise<void>) => {
     setBusy(true)
     try {
@@ -163,6 +163,7 @@ function DouyinWorkspace() {
     if (account.state === 'signedOut') {
       autoScanStartedRef.current = false
       followingScanStartedRef.current = false
+      collectionScanStartedRef.current = false
       setLoginOpen(true)
       return
     }
@@ -183,6 +184,15 @@ function DouyinWorkspace() {
       followingScanStartedRef.current = false
     })
   }, [account.state, activeWorkspace, followingSnapshot.state])
+
+  useEffect(() => {
+    if (activeWorkspace !== 'collections' || account.state !== 'signedIn') return
+    if (collectionSnapshot.state !== 'idle' || collectionScanStartedRef.current) return
+    collectionScanStartedRef.current = true
+    void window.ebb.douyin.collection.scan().catch(() => {
+      collectionScanStartedRef.current = false
+    })
+  }, [account.state, activeWorkspace, collectionSnapshot.state])
 
   useEffect(() => {
     if (snapshot.state !== 'scanning') return
@@ -349,8 +359,9 @@ function DouyinWorkspace() {
             <nav className="absolute left-1/2 flex -translate-x-1/2 rounded-2xl border border-zinc-200/80 bg-white/60 p-1.5 text-sm shadow-sm" aria-label="Douyin workspace" role="group">
               <button type="button" aria-pressed={activeWorkspace === 'likes'} className={`rounded-xl px-5 py-2.5 font-medium transition-colors ${activeWorkspace === 'likes' ? 'bg-zinc-950 text-white shadow-sm' : 'text-zinc-600 hover:bg-white/80'}`} disabled={isWorkspaceSwitchLocked} onClick={() => setActiveWorkspace('likes')}>{t.likedVideosTab}</button>
               <button type="button" aria-pressed={activeWorkspace === 'following'} className={`rounded-xl px-5 py-2.5 font-medium transition-colors ${activeWorkspace === 'following' ? 'bg-zinc-950 text-white shadow-sm' : 'text-zinc-600 hover:bg-white/80'}`} disabled={isWorkspaceSwitchLocked} onClick={() => setActiveWorkspace('following')}>{t.followingAccountsTab}</button>
+              <button type="button" aria-pressed={activeWorkspace === 'collections'} className={`rounded-xl px-5 py-2.5 font-medium transition-colors ${activeWorkspace === 'collections' ? 'bg-zinc-950 text-white shadow-sm' : 'text-zinc-600 hover:bg-white/80'}`} disabled={isWorkspaceSwitchLocked} onClick={() => setActiveWorkspace('collections')}>{t.collectedVideosTab}</button>
             </nav>
-            <Button variant="outline" aria-label={activeWorkspace === 'likes' ? t.refreshList : t.refreshFollowingList} title={activeWorkspace === 'likes' ? t.refreshList : t.refreshFollowingList} className="size-9 rounded-xl border-zinc-200 bg-white/65 p-0 text-zinc-700 shadow-none" disabled={isWorkspaceRefreshDisabled} onClick={activeWorkspace === 'likes' ? refreshVideos : () => void window.ebb.douyin.following.scan()}><Icon name="refresh" className={`size-5 ${isWorkspaceRefreshing ? 'animate-spin' : ''}`} /></Button>
+            <Button variant="outline" aria-label={activeWorkspace === 'likes' ? t.refreshList : activeWorkspace === 'following' ? t.refreshFollowingList : t.refreshCollectionList} title={activeWorkspace === 'likes' ? t.refreshList : activeWorkspace === 'following' ? t.refreshFollowingList : t.refreshCollectionList} className="size-9 rounded-xl border-zinc-200 bg-white/65 p-0 text-zinc-700 shadow-none" disabled={isWorkspaceRefreshDisabled} onClick={activeWorkspace === 'likes' ? refreshVideos : activeWorkspace === 'following' ? () => void window.ebb.douyin.following.scan() : () => void window.ebb.douyin.collection.scan()}><Icon name="refresh" className={`size-5 ${isWorkspaceRefreshing ? 'animate-spin' : ''}`} /></Button>
           </header>
 
           {activeWorkspace === 'likes' ? <section className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
@@ -369,7 +380,7 @@ function DouyinWorkspace() {
               {isRemovalControlVisible ? <button type="button" className="removal-progress group" data-complete={snapshot.state === 'completed'} aria-label={snapshot.state === 'completed' ? t.reset : snapshot.state === 'paused' ? t.continue : t.pause} title={snapshot.state === 'completed' ? t.reset : snapshot.state === 'paused' ? t.continue : t.pause} disabled={busy || (snapshot.state === 'paused' && snapshot.mode === 'selected' && !manualIdsForRemoval.length)} onClick={handleRemovalControl}><span className="removal-progress-fill" style={{ width: `${removalPercent}%` }} />{snapshot.state === 'completed' ? <span className="removal-progress-action"><Icon name="check" className="size-4" /> 100%</span> : snapshot.state === 'paused' ? <span className="removal-progress-action"><Icon name="play" className="size-4" /> {t.continue}</span> : <><span className="removal-progress-label">{t.removing} {completedInCurrentRun}/{snapshot.progress.total}</span><span className="removal-progress-action removal-progress-hover"><Icon name="pause" className="size-4" /></span></>}</button> : <Button variant="destructive" className="h-11 rounded-xl bg-red-600 px-4 text-sm text-white shadow-[0_5px_14px_rgba(220,38,38,0.18)] hover:bg-red-700" disabled={!isSignedIn || isTaskLocked || busy || clearTarget <= 0} onClick={prepareClear}><Icon name="heart" className="size-4" /> {clearButtonLabel}</Button>}
               <Button variant="outline" className="h-11 rounded-xl border-zinc-200 bg-white/65 px-3.5 text-sm text-zinc-700 shadow-none" disabled={!['running', 'paused'].includes(snapshot.state) || busy} onClick={() => run(() => window.ebb.douyin.stop())}><Icon name="stop" className="size-4" /> {t.stop}</Button>
             </div>
-          </section> : <FollowingAccountsPanel account={account} locale={locale} snapshot={followingSnapshot} />}
+          </section> : activeWorkspace === 'following' ? <FollowingAccountsPanel account={account} locale={locale} snapshot={followingSnapshot} /> : <CollectedVideosPanel account={account} locale={locale} snapshot={collectionSnapshot} />}
         </section>
       </div>
 

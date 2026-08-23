@@ -130,3 +130,24 @@ test('shows an injected unfollow failure without contacting Douyin', async ({ br
     await electronApp.close()
   }
 })
+
+test('runs an offline manual uncollect through the production preload bridge', async ({ browserName: _browserName }, testInfo) => {
+  const { electronApp, runtimeErrors, window } = await launchFixture(testInfo.outputDir, 'success')
+  try {
+    await expectIsolatedWindow(electronApp, window)
+    await window.getByRole('button', { name: 'Collected videos' }).click()
+    await expect(window.getByRole('checkbox', { name: 'Offline saved video' })).toBeVisible()
+    await window.getByRole('checkbox', { name: 'Offline saved video' }).click()
+    await window.getByRole('button', { name: 'Remove 1 collected videos' }).click()
+    await window.getByRole('button', { name: 'Remove from collections' }).click()
+    await expect(window.getByText('Offline collection fixture completed.')).toBeVisible()
+
+    const externalRequests = await electronApp.evaluate(() => (
+      (globalThis as typeof globalThis & { getEbbExternalRequestCount: () => number }).getEbbExternalRequestCount()
+    ))
+    expect(externalRequests).toBe(0)
+    expect(runtimeErrors).toEqual([])
+  } finally {
+    await electronApp.close()
+  }
+})

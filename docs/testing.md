@@ -1,6 +1,6 @@
 # Testing
 
-Ebb separates deterministic checks from bounded destructive release checks. Automated tests never load Douyin, read the persistent account partition, or send an unlike or unfollow request to a real account.
+Ebb separates deterministic checks from bounded destructive release checks. Automated tests never load Douyin or TikTok, read persistent account partitions, or send an unlike, uncollect, or unfollow request to a real account.
 
 ## Automated checks
 
@@ -26,12 +26,15 @@ The automated layers cover:
 - Batch-scope calculation and automatic-removal policy.
 - Navigation, QR-image, login-surface, and untrusted-response policy.
 - Account checks, 30-row pagination, low-water prefetching, deduplication, selected/limited/all removal, replacement rows, completed-list refresh, pause, continue, stop, rejected requests, stale counts, sign out, and workspace crashes.
-- Following-account parsing, 20-row pagination, selected/limited/live-all unfollow tasks, the shared mutation lock, and first-rejection pause behavior.
+- Collected-video parsing, pagination, selected/limited/live-all collection-removal tasks, and first-rejection pause behavior.
+- Following-account parsing, 20-row pagination, selected/limited/live-all unfollow tasks, and the shared mutation lock.
 - Preload command/event mapping and main-process IPC registration.
 - QR sign-in presentation, scope selection and confirmation, progress controls, error presentation, language switching, and load-more de-duplication.
 - Electron startup, preload availability, sandbox settings, offline removal flow, and injected failure behavior.
 
-The Electron fixture uses `test-results/` for failure screenshots and traces. It uses a new temporary user-data directory for every test, does not create `persist:ebb-douyin`, and fails if the app attempts an external HTTP(S) request.
+The Electron fixture uses `test-results/` for failure screenshots and traces. It uses a new temporary user-data directory for every test, does not create `persist:ebb-douyin` or `persist:ebb-tiktok`, and fails if the app attempts an external HTTP(S) request.
+
+Shared-platform tests additionally cover unknown totals, platform-namespaced bridges, independent account state, and the application-wide mutation lock. TikTok adapter tests use only sanitized response fixtures described in [tiktok-web-contract.md](tiktok-web-contract.md).
 
 ## Real-account release check
 
@@ -60,6 +63,32 @@ Pause, continue, stop, rate-limit, and rejected-response scenarios are covered b
 5. Confirm and run the task, then verify it reaches **Completed**.
 6. Check in Douyin that the relationship was removed and that Ebb's Following count decreased by one.
 7. Refresh the following list and confirm the account is absent. Do not automatically follow it again.
+
+If the read-only list contract lacks stable IDs or reliable pagination, or if the private write request is rejected because its contract changed, stop verification and record the response difference. Do not fall back to DOM automation or signature engineering.
+
+## Real-account TikTok release check
+
+> This gate performs three irreversible changes. Use one explicitly expendable liked video, one Favorite Video, and one following relationship. Never use **All**.
+
+1. Complete every automated gate and the read-only checks in [tiktok-web-contract.md](tiktok-web-contract.md).
+2. Sign in by TikTok QR code, restart Ebb, and confirm the independent TikTok session restores.
+3. Remove exactly one manually selected like, refresh, and confirm the video is absent on TikTok.
+4. Remove exactly one manually selected Favorite Video, refresh, and confirm it is absent.
+5. Unfollow exactly one manually selected account, refresh, and confirm it is absent.
+6. Sign out from TikTok and confirm the Douyin session remains unchanged.
+
+Stop immediately if any request requires a generated signature, DOM automation, verification bypass, or repeated retries. A failure in any of the three workflows blocks the complete TikTok milestone.
+
+## Real-account collection-removal release check
+
+> This procedure removes one real collection and Ebb cannot restore it. Choose a video you are willing to remove from your collections. Never use **All** for release verification.
+
+1. Run `npm run verify`; do not continue unless every automated gate passes.
+2. Run `npm run dev`, restore the saved session, and open **Collected videos**.
+3. Confirm the first collected-video rows load and the displayed collection count is plausible.
+4. Select exactly one expendable video and confirm the scope changes to **Custom**.
+5. Confirm and run the task; verify it reaches **Completed**.
+6. Check in Douyin that the video's overall collection has been cancelled and that Ebb's collection count decreased by one.
 
 If the read-only list contract lacks stable IDs or reliable pagination, or if the private write request is rejected because its contract changed, stop verification and record the response difference. Do not fall back to DOM automation or signature engineering.
 

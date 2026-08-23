@@ -29,15 +29,31 @@ export function createDouyinPlatformModule(getHostWindow: () => BrowserWindow | 
       getHostWindow()?.webContents.send(DOUYIN_IPC_CHANNELS.following.status, snapshot)
     },
   )
+  const collectionTaskService = new DouyinTaskService(
+    client,
+    (snapshot) => {
+      getHostWindow()?.webContents.send(DOUYIN_IPC_CHANNELS.collection.status, snapshot)
+    },
+    (account) => {
+      getHostWindow()?.webContents.send(DOUYIN_IPC_CHANNELS.account, account)
+    },
+    () => {},
+    undefined,
+    mutationCoordinator,
+    { kind: 'collections', ownsClient: false },
+  )
   const stopFollowingCrashListener = client.onWorkspaceCrash(() => followingTaskService.handleWorkspaceCrash())
+  const stopCollectionCrashListener = client.onWorkspaceCrash(() => collectionTaskService.handleWorkspaceCrash())
 
-  registerDouyinIpcHandlers(ipcMain, taskService, followingTaskService)
+  registerDouyinIpcHandlers(ipcMain, taskService, followingTaskService, collectionTaskService)
 
   return {
     initialize: (_hostWindow: BrowserWindow) => taskService.initialize(),
     dispose: () => {
       stopFollowingCrashListener()
+      stopCollectionCrashListener()
       followingTaskService.dispose()
+      collectionTaskService.dispose()
       taskService.dispose()
     },
   }

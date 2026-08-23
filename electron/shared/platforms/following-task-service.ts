@@ -123,7 +123,7 @@ export class DouyinFollowingTaskService {
     if (!selectedIds.length) throw new Error('Select at least one account before starting.')
     if (this.isRunning) return
     const selected = new Set(selectedIds)
-    const knownIds = new Set(this.accounts.map((item) => item.secUserId))
+    const knownIds = new Set(this.accounts.map((item) => item.id))
     if (selectedIds.some((id) => !knownIds.has(id))) {
       throw new Error('The selection is no longer available. Scan again.')
     }
@@ -134,7 +134,7 @@ export class DouyinFollowingTaskService {
     this.taskCompleted = 0
     this.taskTotal = selectedIds.length
     for (const item of this.accounts) {
-      if (selected.has(item.secUserId) && item.status !== 'completed') item.status = 'pending'
+      if (selected.has(item.id) && item.status !== 'completed') item.status = 'pending'
     }
     this.state = 'running'
     this.message = 'Unfollowing selected accounts through the Douyin web API.'
@@ -164,7 +164,7 @@ export class DouyinFollowingTaskService {
     this.taskIds = new Set()
     this.replacementAccounts = []
     this.completionRefreshError = undefined
-    this.taskProcessedIds = new Set(this.accounts.filter((item) => item.status === 'completed').map((item) => item.secUserId))
+    this.taskProcessedIds = new Set(this.accounts.filter((item) => item.status === 'completed').map((item) => item.id))
     this.taskCompleted = 0
     this.taskTotal = total
     for (const item of this.accounts) {
@@ -190,12 +190,12 @@ export class DouyinFollowingTaskService {
     if (this.state !== 'paused' || !this.taskMode) return
     this.mutationCoordinator.acquire('following')
     if (this.taskMode === 'selected') {
-      const knownIds = new Set(this.accounts.map((item) => item.secUserId))
+      const knownIds = new Set(this.accounts.map((item) => item.id))
       if (!this.taskIds.size || [...this.taskIds].some((id) => !knownIds.has(id))) {
         throw new Error('The selection is no longer available. Scan again.')
       }
       for (const item of this.accounts) {
-        if (this.taskIds.has(item.secUserId) && item.status === 'failed') item.status = 'pending'
+        if (this.taskIds.has(item.id) && item.status === 'failed') item.status = 'pending'
       }
     } else {
       for (const item of this.accounts) {
@@ -257,13 +257,13 @@ export class DouyinFollowingTaskService {
     try {
       await this.accountContext.requireSignedInUserId()
       for (const item of this.accounts) {
-        if (!selectedIds.has(item.secUserId) || item.status === 'completed') continue
+        if (!selectedIds.has(item.id) || item.status === 'completed') continue
         if (this.state !== 'running') return
-        this.currentAccountId = item.secUserId
+        this.currentAccountId = item.id
         item.status = 'processing'
         this.publishSnapshot(selectedIds)
         try {
-          await this.client.unfollow(item.secUserId)
+          await this.client.unfollow(item.id)
           item.status = 'completed'
           this.taskCompleted += 1
           this.accountContext.decrementFollowingCount()
@@ -325,13 +325,13 @@ export class DouyinFollowingTaskService {
             await this.completeAutomatic(false)
             return
           }
-          this.currentAccountId = item.secUserId
+          this.currentAccountId = item.id
           item.status = 'processing'
           this.publishSnapshot()
           try {
-            await this.client.unfollow(item.secUserId)
+            await this.client.unfollow(item.id)
             item.status = 'completed'
-            this.taskProcessedIds.add(item.secUserId)
+            this.taskProcessedIds.add(item.id)
             this.taskCompleted += 1
             if (this.taskMode === 'all') this.taskTotal = Math.max(this.taskTotal, this.taskCompleted)
             this.accountContext.decrementFollowingCount()
@@ -389,7 +389,7 @@ export class DouyinFollowingTaskService {
       this.hasMore = true
       do {
         await this.loadNextPage()
-        this.accounts = this.accounts.filter((item) => !this.taskProcessedIds.has(item.secUserId))
+        this.accounts = this.accounts.filter((item) => !this.taskProcessedIds.has(item.id))
       } while (this.state === 'running' && !this.accounts.length && this.hasMore)
       this.capAutomaticPendingRows()
       const reportedCount = this.accountContext.getSnapshot().followingCount
@@ -521,13 +521,13 @@ export class DouyinFollowingTaskService {
   }
 
   private appendReplacementAccounts(limit: number) {
-    const knownIds = new Set(this.accounts.map((item) => item.secUserId))
+    const knownIds = new Set(this.accounts.map((item) => item.id))
     let appended = 0
     while (this.replacementAccounts.length && appended < limit) {
       const item = this.replacementAccounts.shift()
-      if (!item || knownIds.has(item.secUserId)) continue
+      if (!item || knownIds.has(item.id)) continue
       this.accounts.push(item)
-      knownIds.add(item.secUserId)
+      knownIds.add(item.id)
       appended += 1
     }
     return appended
@@ -535,13 +535,13 @@ export class DouyinFollowingTaskService {
 
   private bufferReplacementAccounts(accounts: FollowingAccount[]) {
     const knownIds = new Set([
-      ...this.accounts.map((item) => item.secUserId),
-      ...this.replacementAccounts.map((item) => item.secUserId),
+      ...this.accounts.map((item) => item.id),
+      ...this.replacementAccounts.map((item) => item.id),
     ])
     for (const item of accounts) {
-      if (this.taskProcessedIds.has(item.secUserId) || knownIds.has(item.secUserId)) continue
+      if (this.taskProcessedIds.has(item.id) || knownIds.has(item.id)) continue
       this.replacementAccounts.push({ ...item, status: 'pending' })
-      knownIds.add(item.secUserId)
+      knownIds.add(item.id)
     }
   }
 
@@ -549,9 +549,9 @@ export class DouyinFollowingTaskService {
     if (this.appendReplacementAccounts(1)) return
     while (this.hasMore) {
       const current = [...this.accounts]
-      const currentIds = new Set(current.map((item) => item.secUserId))
+      const currentIds = new Set(current.map((item) => item.id))
       await this.loadNextPage()
-      const fetched = this.accounts.filter((item) => !currentIds.has(item.secUserId))
+      const fetched = this.accounts.filter((item) => !currentIds.has(item.id))
       this.accounts = current
       this.replacementAccounts.push(...fetched)
       if (this.appendReplacementAccounts(1)) return
@@ -563,11 +563,11 @@ export class DouyinFollowingTaskService {
     this.isLoadingMore = true
     this.publishSnapshot()
     try {
-      const secUserId = await this.accountContext.requireSignedInUserId()
+      const id = await this.accountContext.requireSignedInUserId()
       const cursor = this.nextCursor
-      const page = await this.client.loadFollowing(secUserId, cursor, FOLLOWING_PAGE_SIZE)
-      const found = new Map(this.accounts.map((item) => [item.secUserId, item]))
-      for (const item of page.accounts) found.set(item.secUserId, item)
+      const page = await this.client.loadFollowing(id, cursor, FOLLOWING_PAGE_SIZE)
+      const found = new Map(this.accounts.map((item) => [item.id, item]))
+      for (const item of page.accounts) found.set(item.id, item)
       this.accounts = [...found.values()]
       this.hasMore = page.hasMore
       if (page.nextCursor) this.nextCursor = page.nextCursor
@@ -577,8 +577,8 @@ export class DouyinFollowingTaskService {
   }
 
   private async loadFirstPage() {
-    const secUserId = await this.accountContext.requireSignedInUserId()
-    return this.client.loadFollowing(secUserId, '0', FOLLOWING_PAGE_SIZE)
+    const id = await this.accountContext.requireSignedInUserId()
+    return this.client.loadFollowing(id, '0', FOLLOWING_PAGE_SIZE)
   }
 
   private resetTask() {
@@ -598,7 +598,7 @@ export class DouyinFollowingTaskService {
     let completed = 0
     let failed = 0
     for (const item of this.accounts) {
-      if (selectedIds.has(item.secUserId)) selected += 1
+      if (selectedIds.has(item.id)) selected += 1
       if (item.status === 'completed') completed += 1
       else if (item.status === 'failed') failed += 1
     }

@@ -62,16 +62,17 @@ export function parseCurrentUser(payload: JsonObject): DouyinCurrentUser {
   const data = isObject(payload.data) ? payload.data : undefined
   const candidates = [payload.user, payload.user_info, data?.user, data?.user_info, data].filter(isObject)
   for (const user of candidates) {
-    const secUserId = readString(user, 'sec_uid') ?? readString(user, 'sec_user_id')
-    if (!secUserId) continue
+    const id = readString(user, 'sec_uid') ?? readString(user, 'sec_user_id')
+    if (!id) continue
     const avatarObject = isObject(user.avatar_thumb) ? user.avatar_thumb : undefined
     const avatarSources = avatarObject && Array.isArray(avatarObject.url_list) ? avatarObject.url_list : []
     return {
-      secUserId,
-      name: readString(user, 'nickname') ?? readString(user, 'unique_id') ?? 'Douyin user',
+      id,
+      name: readString(user, 'displayName') ?? readString(user, 'unique_id') ?? 'Douyin user',
       avatar: avatarSources.find((source): source is string => typeof source === 'string'),
-      likesCount: readNumber(user, 'favoriting_count'),
+      likedVideosCount: readNumber(user, 'favoriting_count'),
       followingCount: readNumber(user, 'following_count'),
+      collectedVideosCount: readNumber(user, 'collect_count'),
     }
   }
   throw new Error('Douyin did not return the current user. Sign in again and retry.')
@@ -82,15 +83,15 @@ export function parseFollowingPage(payload: JsonObject, currentCursor: string): 
   const accounts: FollowingAccount[] = []
   const records = Array.isArray(payload.followings) ? payload.followings.filter(isObject) : []
   for (const record of records) {
-    const secUserId = readString(record, 'sec_uid') ?? readString(record, 'sec_user_id')
-    if (!secUserId) continue
+    const id = readString(record, 'sec_uid') ?? readString(record, 'sec_user_id')
+    if (!id) continue
     const avatarObject = isObject(record.avatar_thumb) ? record.avatar_thumb : undefined
     const avatarSources = avatarObject && Array.isArray(avatarObject.url_list) ? avatarObject.url_list : []
-    const uniqueId = readString(record, 'unique_id') || undefined
+    const username = readString(record, 'unique_id') || undefined
     accounts.push({
-      secUserId,
-      nickname: readString(record, 'nickname') || 'Douyin account',
-      uniqueId,
+      id,
+      displayName: readString(record, 'displayName') || 'Douyin account',
+      username,
       avatar: avatarSources.find((source): source is string => typeof source === 'string'),
       relation: readNumber(record, 'follower_status') === 1 ? 'mutual' : 'following',
       status: 'pending',
@@ -124,7 +125,7 @@ export function parseFavoritePage(payload: JsonObject, currentCursor: string): D
     })
   }
 
-  const nextCursor = readString(payload, 'max_cursor')
+  const nextCursor = readString(payload, 'max_cursor') ?? readString(payload, 'cursor')
   return {
     videos,
     nextCursor,

@@ -16,11 +16,18 @@ describe('Douyin mutation coordinator', () => {
     coordinator.release('likes')
     coordinator.acquire('following')
     expect(coordinator.currentOwner()).toBe('following')
+    expect(() => coordinator.acquire('collections')).toThrow(/following-account task is active/i)
   })
 
   test('lets a task reacquire its retained lock while paused', () => {
     const coordinator = new DouyinMutationCoordinator()
     coordinator.acquire('following')
     expect(() => coordinator.acquire('following')).not.toThrow()
+  })
+
+  test('identifies a collection task while it holds the shared mutation lock', () => {
+    const coordinator = new DouyinMutationCoordinator()
+    coordinator.acquire('collections')
+    expect(() => coordinator.acquire('likes')).toThrow(/collection-video task is active/i)
   })
 })

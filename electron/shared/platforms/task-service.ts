@@ -7,9 +7,9 @@ import type {
   TaskSnapshot,
   TaskState,
 } from '../../../shared/platforms/douyin/contracts.js'
-import { AUTOMATIC_PREFETCH_THRESHOLD, FAVORITES_PAGE_SIZE } from './policy.js'
+import { AUTOMATIC_PREFETCH_THRESHOLD, COLLECTIONS_PAGE_SIZE, FAVORITES_PAGE_SIZE } from './policy.js'
 import type { DouyinClient } from './client.js'
-import { DouyinMutationCoordinator } from './mutation-coordinator.js'
+import { DouyinMutationCoordinator, type DouyinMutationOwner } from './mutation-coordinator.js'
 import {
   createAutomaticRemovalPlan,
   hasReachedAutomaticTarget,
@@ -20,14 +20,50 @@ type StatusPublisher = (snapshot: TaskSnapshot) => void
 type AccountPublisher = (snapshot: AccountSnapshot) => void
 type LoginPublisher = (snapshot: LoginSnapshot) => void
 
+export type DouyinVideoTaskKind = 'likes' | 'collections'
+
+export interface DouyinVideoTaskOptions {
+  kind?: DouyinVideoTaskKind
+  ownsClient?: boolean
+}
+
+const videoTaskConfig = {
+  likes: {
+    accountCount: 'likedVideosCount',
+    emptyMessage: 'No liked videos were returned. Confirm that the saved Douyin account is signed in, then scan again.',
+    itemLabel: 'liked video',
+    itemPluralLabel: 'liked videos',
+    owner: 'likes',
+    pageSize: FAVORITES_PAGE_SIZE,
+    taskLabel: 'like',
+  },
+  collections: {
+    accountCount: 'collectedVideosCount',
+    emptyMessage: 'No collected videos were returned. Confirm that the saved Douyin account is signed in, then scan again.',
+    itemLabel: 'collected video',
+    itemPluralLabel: 'collected videos',
+    owner: 'collections',
+    pageSize: COLLECTIONS_PAGE_SIZE,
+    taskLabel: 'collection',
+  },
+} as const satisfies Record<DouyinVideoTaskKind, {
+  accountCount: 'likedVideosCount' | 'collectedVideosCount'
+  emptyMessage: string
+  itemLabel: string
+  itemPluralLabel: string
+  owner: DouyinMutationOwner
+  pageSize: number
+  taskLabel: string
+}>
+
 const sleep = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds))
 
 export class DouyinTaskService {
   private loginPoll?: NodeJS.Timeout
   private loginAccountPoll?: NodeJS.Timeout
   private loginPollPending = false
-  private loginAccountPollPending = false
-  private loginQrCapturedAt = 0
+  private loginAccountProbe?: Promise<boolean>
+  private loginSetup?: Promise<void>
   private loginVisible = false
   private stopCrashListener?: () => void
   private state: TaskState = 'idle'
@@ -38,7 +74,7 @@ export class DouyinTaskService {
   private isLoadingMore = false
   private isRefreshingCompletedList = false
   private completionRefreshError?: string
-  private secUserId?: string
+  private id?: string
   private message?: string
   private isRunning = false
   private taskMode?: TaskMode
@@ -55,6 +91,7 @@ export class DouyinTaskService {
   private readonly client: DouyinClient
   private readonly wait: (milliseconds: number) => Promise<void>
   private readonly mutationCoordinator: DouyinMutationCoordinator
+  private readonly options: Required<DouyinVideoTaskOptions>
   private account: AccountSnapshot = { state: 'checking' }
   private login: LoginSnapshot = { state: 'idle' }
 
@@ -65,6 +102,7 @@ export class DouyinTaskService {
     publishLogin: LoginPublisher,
     wait: (milliseconds: number) => Promise<void> = sleep,
     mutationCoordinator: DouyinMutationCoordinator = new DouyinMutationCoordinator(),
+    options: DouyinVideoTaskOptions = {},
   ) {
     this.client = client
     this.publish = publish
@@ -72,6 +110,32 @@ export class DouyinTaskService {
     this.publishLogin = publishLogin
     this.wait = wait
     this.mutationCoordinator = mutationCoordinator
+    this.options = { kind: options.kind ?? 'likes', ownsClient: options.ownsClient ?? true }
+  }
+
+  private get config() {
+    return videoTaskConfig[this.options.kind]
+  }
+
+  private get accountItemCount() {
+    return this.account[this.config.accountCount]
+  }
+
+  private decrementAccountItemCount() {
+    const count = this.accountItemCount
+    if (count === undefined || count <= 0) return
+    this.account = { ...this.account, [this.config.accountCount]: count - 1 }
+    this.publishAccountSnapshot()
+  }
+
+  private loadVideos(id: string, cursor: string, count: number) {
+    return this.options.kind === 'likes'
+      ? this.client.loadFavorites(id, cursor, count)
+      : this.client.loadCollections(id, cursor, count)
+  }
+
+  private removeVideo(videoId: string) {
+    return this.options.kind === 'likes' ? this.client.unlike(videoId) : this.client.uncollect(videoId)
   }
 
   async initialize() {
@@ -95,8 +159,8 @@ export class DouyinTaskService {
 
   async requireSignedInUserId() {
     await this.ensureSignedIn()
-    if (!this.secUserId) this.secUserId = (await this.client.getCurrentUser()).secUserId
-    return this.secUserId
+    if (!this.id) this.id = (await this.client.getCurrentUser()).id
+    return this.id
   }
 
   decrementFollowingCount() {
@@ -105,12 +169,32 @@ export class DouyinTaskService {
     this.publishAccountSnapshot()
   }
 
+  decrementCollectionCount() {
+    if (this.account.collectedVideosCount === undefined || this.account.collectedVideosCount <= 0) return
+    this.account = { ...this.account, collectedVideosCount: this.account.collectedVideosCount - 1 }
+    this.publishAccountSnapshot()
+  }
+
   async showLogin() {
-    await this.client.initialize()
     this.loginVisible = true
-    if (this.login.state !== 'ready' || Date.now() - this.loginQrCapturedAt > 60_000) {
-      this.setLoginSnapshot({ state: 'loading' })
+    this.setLoginSnapshot({ state: 'loading' })
+    if (this.loginSetup) {
+      await this.loginSetup
+      return
     }
+
+    // React StrictMode may remount the renderer effect while the hidden page is still loading.
+    const setup = (async () => {
+      await this.client.initialize()
+      await this.client.refreshLogin()
+    })()
+    this.loginSetup = setup
+    try {
+      await setup
+    } finally {
+      if (this.loginSetup === setup) this.loginSetup = undefined
+    }
+    if (!this.loginVisible) return
     this.startLoginPolling()
     void this.pollLogin()
     void this.pollLoginAccount()
@@ -131,16 +215,16 @@ export class DouyinTaskService {
     this.hideLogin()
     this.stopCrashListener?.()
     this.stopCrashListener = undefined
-    this.mutationCoordinator.release('likes')
-    this.client.dispose()
+    this.mutationCoordinator.release(this.config.owner)
+    if (this.options.ownsClient) this.client.dispose()
   }
 
-  private handleWorkspaceCrash() {
+  handleWorkspaceCrash() {
     this.stopLoginPolling()
     this.setLoginSnapshot({ state: 'error', message: 'The Douyin sign-in process stopped unexpectedly.' })
     this.account = { state: 'signedOut', message: 'The Douyin sign-in page stopped unexpectedly. Try again.' }
     this.publishAccountSnapshot()
-    this.mutationCoordinator.release('likes')
+    this.mutationCoordinator.release(this.config.owner)
   }
 
   async scan() {
@@ -153,15 +237,15 @@ export class DouyinTaskService {
     this.hasMore = false
     this.isRefreshingCompletedList = false
     this.completionRefreshError = undefined
-    this.message = `Loading the first ${FAVORITES_PAGE_SIZE} liked videos.`
+    this.message = `Loading the first ${this.config.pageSize} ${this.config.itemPluralLabel}.`
     this.publishSnapshot()
 
     try {
       await this.loadNextPage()
       this.state = 'ready'
       this.message = this.videos.length
-        ? `Loaded ${this.videos.length} liked videos.${this.hasMore ? ' Scroll down to load more.' : ''}`
-        : 'No liked videos were returned. Confirm that the saved Douyin account is signed in, then scan again.'
+        ? `Loaded ${this.videos.length} ${this.config.itemPluralLabel}.${this.hasMore ? ' Scroll down to load more.' : ''}`
+        : this.config.emptyMessage
     } catch (error) {
       this.state = 'paused'
       this.message = this.errorMessage(error)
@@ -180,8 +264,8 @@ export class DouyinTaskService {
     const previousState = this.state
     try {
       await this.ensureSignedIn()
-      if (!this.appendReplacementVideos(FAVORITES_PAGE_SIZE)) await this.loadNextPage()
-      this.message = `Loaded ${this.videos.length} liked videos.${this.hasMore ? ' Scroll down to load more.' : ''}`
+      if (!this.appendReplacementVideos(this.config.pageSize)) await this.loadNextPage()
+      this.message = `Loaded ${this.videos.length} ${this.config.itemPluralLabel}.${this.hasMore ? ' Scroll down to load more.' : ''}`
     } catch (error) {
       if (previousState === 'ready') this.state = 'paused'
       this.message = this.errorMessage(error)
@@ -207,7 +291,7 @@ export class DouyinTaskService {
     const selected = new Set(selectedIds)
     const knownIds = new Set(this.videos.map((video) => video.id))
     if (selectedIds.some((id) => !knownIds.has(id))) throw new Error('The selection is no longer available. Scan again.')
-    this.mutationCoordinator.acquire('likes')
+    this.mutationCoordinator.acquire(this.config.owner)
 
     this.taskMode = 'selected'
     this.taskIds = selected
@@ -218,7 +302,7 @@ export class DouyinTaskService {
       if (selected.has(video.id) && video.status !== 'completed') video.status = 'pending'
     }
     this.state = 'running'
-    this.message = 'Removing likes through the Douyin web API.'
+    this.message = `Removing ${this.config.itemPluralLabel} through the Douyin web API.`
     this.publishSnapshot(selected)
     void this.processQueue(selected)
   }
@@ -228,8 +312,8 @@ export class DouyinTaskService {
     await this.ensureSignedIn()
 
     const pendingCount = this.videos.filter((video) => video.status !== 'completed').length
-    const plan = createAutomaticRemovalPlan(limit, this.account.likesCount, pendingCount)
-    this.mutationCoordinator.acquire('likes')
+    const plan = createAutomaticRemovalPlan(limit, this.accountItemCount, pendingCount, this.config.itemPluralLabel)
+    this.mutationCoordinator.acquire(this.config.owner)
     this.taskMode = plan.mode
     this.taskIds = new Set()
     this.replacementVideos = []
@@ -243,10 +327,10 @@ export class DouyinTaskService {
     this.capAutomaticPendingRows()
     this.state = 'running'
     this.message = plan.mode === 'all'
-      ? 'Removing every liked video and loading new batches until none remain.'
-      : `Removing up to ${plan.total} liked videos.`
+      ? `Removing every ${this.config.itemLabel} and loading new batches until none remain.`
+      : `Removing up to ${plan.total} ${this.config.itemPluralLabel}.`
     this.publishSnapshot()
-    void this.processAllLikes()
+    void this.processAutomaticRemoval()
   }
 
   pause() {
@@ -277,15 +361,15 @@ export class DouyinTaskService {
 
     this.state = 'running'
     this.message = this.taskMode === 'all'
-      ? 'Continuing removal of every liked video.'
+      ? `Continuing removal of every ${this.config.itemLabel}.`
       : this.taskMode === 'limited'
-        ? `Continuing removal of up to ${this.taskTotal} liked videos.`
-        : 'Continuing removal of the selected liked videos.'
+        ? `Continuing removal of up to ${this.taskTotal} ${this.config.itemPluralLabel}.`
+        : `Continuing removal of the selected ${this.config.itemPluralLabel}.`
     this.publishSnapshot(this.taskMode === 'selected' ? this.taskIds : undefined)
     // An in-flight worker observes the restored running state before sending its next request.
     if (this.isRunning) return
     if (this.taskMode === 'selected') void this.processQueue(this.taskIds)
-    else void this.processAllLikes()
+    else void this.processAutomaticRemoval()
   }
 
   stop() {
@@ -296,19 +380,19 @@ export class DouyinTaskService {
     this.currentVideoId = undefined
     this.message = this.taskMode === 'selected'
       ? 'Task stopped. Unprocessed videos remain selected.'
-      : 'Automatic removal stopped. Liked videos remain.'
+      : `Automatic removal stopped. ${this.config.itemPluralLabel[0].toUpperCase()}${this.config.itemPluralLabel.slice(1)} remain.`
     this.publishSnapshot(this.taskMode === 'selected' ? this.taskIds : undefined)
-    if (!this.isRunning) this.mutationCoordinator.release('likes')
+    if (!this.isRunning) this.mutationCoordinator.release(this.config.owner)
   }
 
   async signOut() {
     this.stop()
-    this.mutationCoordinator.release('likes')
+    this.mutationCoordinator.release(this.config.owner)
     this.hideLogin()
     this.setLoginSnapshot({ state: 'idle' })
     await this.client.clearSession()
     this.account = { state: 'signedOut' }
-    this.secUserId = undefined
+    this.id = undefined
     this.nextCursor = '0'
     this.hasMore = false
     this.isRefreshingCompletedList = false
@@ -317,6 +401,19 @@ export class DouyinTaskService {
     this.state = 'idle'
     this.resetTask()
     this.videos = []
+    this.message = 'Signed out from Douyin on this device.'
+    this.publishSnapshot()
+  }
+
+  resetForSignOut() {
+    this.stop()
+    this.mutationCoordinator.release(this.config.owner)
+    this.state = 'idle'
+    this.videos = []
+    this.nextCursor = '0'
+    this.hasMore = false
+    this.isRefreshingCompletedList = false
+    this.resetTask()
     this.message = 'Signed out from Douyin on this device.'
     this.publishSnapshot()
   }
@@ -334,13 +431,10 @@ export class DouyinTaskService {
         this.publishSnapshot(selectedIds)
 
         try {
-          await this.client.unlike(video.id)
+          await this.removeVideo(video.id)
           video.status = 'completed'
           this.taskCompleted += 1
-          if (this.account.likesCount !== undefined && this.account.likesCount > 0) {
-            this.account = { ...this.account, likesCount: this.account.likesCount - 1 }
-            this.publishAccountSnapshot()
-          }
+          this.decrementAccountItemCount()
         } catch (error) {
           video.status = 'failed'
           this.state = 'paused'
@@ -363,7 +457,7 @@ export class DouyinTaskService {
       if (this.state === 'running') {
         this.state = 'completed'
         this.message = 'The selected videos have been processed.'
-        this.mutationCoordinator.release('likes')
+        this.mutationCoordinator.release(this.config.owner)
         this.publishSnapshot(selectedIds)
       }
     } catch (error) {
@@ -372,11 +466,11 @@ export class DouyinTaskService {
       this.publishSnapshot(selectedIds)
     } finally {
       this.isRunning = false
-      if (this.state === 'stopped') this.mutationCoordinator.release('likes')
+      if (this.state === 'stopped') this.mutationCoordinator.release(this.config.owner)
     }
   }
 
-  private async processAllLikes() {
+  private async processAutomaticRemoval() {
     this.isRunning = true
     try {
       await this.ensureSignedIn()
@@ -409,14 +503,11 @@ export class DouyinTaskService {
           this.publishSnapshot()
 
           try {
-            await this.client.unlike(video.id)
+            await this.removeVideo(video.id)
             video.status = 'completed'
             this.taskProcessedIds.add(video.id)
             this.taskCompleted += 1
-            if (this.account.likesCount !== undefined && this.account.likesCount > 0) {
-              this.account = { ...this.account, likesCount: this.account.likesCount - 1 }
-              this.publishAccountSnapshot()
-            }
+            this.decrementAccountItemCount()
           } catch (error) {
             video.status = 'failed'
             this.state = 'paused'
@@ -441,12 +532,12 @@ export class DouyinTaskService {
       this.publishSnapshot()
     } finally {
       this.isRunning = false
-      if (this.state === 'stopped') this.mutationCoordinator.release('likes')
+      if (this.state === 'stopped') this.mutationCoordinator.release(this.config.owner)
     }
   }
 
   private async loadNextAutomaticBatch() {
-    this.message = 'Loading the next batch of liked videos.'
+    this.message = `Loading the next batch of ${this.config.itemPluralLabel}.`
 
     // Start at the first page after each mutation because later videos shift forward as likes are removed.
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -460,7 +551,7 @@ export class DouyinTaskService {
 
       this.capAutomaticPendingRows()
 
-      if (this.videos.length || !this.account.likesCount || this.state !== 'running') {
+      if (this.videos.length || !this.accountItemCount || this.state !== 'running') {
         this.publishSnapshot()
         return
       }
@@ -474,7 +565,7 @@ export class DouyinTaskService {
       return
     }
 
-    throw new Error('Douyin still reports liked videos but did not return a new batch. Continue to retry.')
+    throw new Error(`Douyin still reports ${this.config.itemPluralLabel} but did not return a new batch. Continue to retry.`)
   }
 
   private async refillAutomaticQueue() {
@@ -536,7 +627,7 @@ export class DouyinTaskService {
     if (!this.taskMode || this.taskMode === 'selected') return 0
     const pendingCount = this.videos.filter((video) => video.status !== 'completed').length
     const desiredCount = Math.min(
-      FAVORITES_PAGE_SIZE,
+      this.config.pageSize,
       remainingAutomaticTarget(this.taskMode, this.taskCompleted, this.taskTotal),
     )
     return this.appendReplacementVideos(Math.max(0, desiredCount - pendingCount))
@@ -545,7 +636,7 @@ export class DouyinTaskService {
   private capAutomaticPendingRows() {
     if (!this.taskMode || this.taskMode === 'selected') return
     const desiredCount = Math.min(
-      FAVORITES_PAGE_SIZE,
+      this.config.pageSize,
       remainingAutomaticTarget(this.taskMode, this.taskCompleted, this.taskTotal),
     )
     let keptPending = 0
@@ -569,13 +660,13 @@ export class DouyinTaskService {
     this.currentVideoId = undefined
     if (mode === 'limited') {
       if (exhausted && this.taskCompleted < this.taskTotal) this.taskTotal = this.taskCompleted
-      this.message = `Removed ${this.taskCompleted} liked videos.`
+      this.message = `Removed ${this.taskCompleted} ${this.config.itemPluralLabel}.`
     } else {
       this.hasMore = false
-      this.message = 'All liked videos have been removed.'
+      this.message = `All ${this.config.itemPluralLabel} have been removed.`
     }
     this.videos = []
-    this.mutationCoordinator.release('likes')
+    this.mutationCoordinator.release(this.config.owner)
     this.publishSnapshot()
     await this.waitForAutomaticPrefetch()
     await this.refreshCompletedAutomaticList()
@@ -592,20 +683,20 @@ export class DouyinTaskService {
     try {
       await this.ensureSignedIn()
       const mode = this.taskMode
-      if (mode === 'limited') this.appendReplacementVideos(FAVORITES_PAGE_SIZE)
+      if (mode === 'limited') this.appendReplacementVideos(this.config.pageSize)
 
       // All scopes deliberately verify the empty result; limited scopes only request when the cache is short.
-      if (mode === 'all' || this.videos.length < FAVORITES_PAGE_SIZE) {
+      if (mode === 'all' || this.videos.length < this.config.pageSize) {
         const page = await this.loadFirstPage()
         this.hasMore = page.hasMore
         this.nextCursor = page.nextCursor ?? '0'
         this.bufferReplacementVideos(page.videos)
-        this.appendReplacementVideos(FAVORITES_PAGE_SIZE - this.videos.length)
+        this.appendReplacementVideos(this.config.pageSize - this.videos.length)
       }
 
       this.message = mode === 'all'
-        ? 'All liked videos have been removed.'
-        : `Removed ${this.taskCompleted} liked videos.`
+        ? `All ${this.config.itemPluralLabel} have been removed.`
+        : `Removed ${this.taskCompleted} ${this.config.itemPluralLabel}.`
     } catch (error) {
       this.completionRefreshError = this.errorMessage(error)
     } finally {
@@ -668,7 +759,7 @@ export class DouyinTaskService {
 
   private async ensureSignedIn() {
     if (this.account.state !== 'signedIn') await this.refreshAccount()
-    if (this.account.state !== 'signedIn') throw new Error('Scan the QR code to sign in before scanning likes.')
+    if (this.account.state !== 'signedIn') throw new Error(`Scan the QR code to sign in before scanning ${this.config.itemPluralLabel}.`)
   }
 
   private async refreshAccount() {
@@ -677,13 +768,14 @@ export class DouyinTaskService {
     try {
       const user = await this.client.getCurrentUser()
       this.client.flushSession()
-      this.secUserId = user.secUserId
+      this.id = user.id
       this.account = {
         state: 'signedIn',
         name: user.name,
         avatar: user.avatar,
-        likesCount: user.likesCount,
+        likedVideosCount: user.likedVideosCount,
         followingCount: user.followingCount,
+        collectedVideosCount: user.collectedVideosCount,
       }
       this.publishAccountSnapshot()
       if (this.loginVisible) {
@@ -714,7 +806,6 @@ export class DouyinTaskService {
     this.loginPoll = undefined
     this.loginAccountPoll = undefined
     this.loginPollPending = false
-    this.loginAccountPollPending = false
   }
 
   private async pollLogin() {
@@ -725,7 +816,9 @@ export class DouyinTaskService {
       if (surface.state === 'ready') {
         this.setLoginSnapshot({ state: 'ready', qrCode: surface.qrCode })
       } else if (surface.state === 'verification') {
-        this.setLoginSnapshot({ state: 'verification' })
+        if (this.login.state === 'verification') return
+        const signedIn = await this.pollLoginAccount()
+        if (!signedIn && this.loginVisible) this.setLoginSnapshot({ state: 'verification' })
       } else {
         this.setLoginSnapshot({ state: 'loading' })
       }
@@ -736,27 +829,38 @@ export class DouyinTaskService {
     }
   }
 
-  private async pollLoginAccount() {
-    if (!this.loginVisible || this.loginAccountPollPending) return
-    this.loginAccountPollPending = true
-    try {
-      const user = await this.client.getCurrentUser()
-      this.client.flushSession()
-      this.secUserId = user.secUserId
-      this.account = {
-        state: 'signedIn',
-        name: user.name,
-        avatar: user.avatar,
-        likesCount: user.likesCount,
-        followingCount: user.followingCount,
+  private async pollLoginAccount(): Promise<boolean> {
+    if (!this.loginVisible) return false
+    // Share the in-flight profile check so surface detection waits for the same login verdict.
+    if (this.loginAccountProbe) return this.loginAccountProbe
+
+    const probe = (async () => {
+      try {
+        const user = await this.client.getCurrentUser()
+        this.client.flushSession()
+        this.id = user.id
+        this.account = {
+          state: 'signedIn',
+          name: user.name,
+          avatar: user.avatar,
+          likedVideosCount: user.likedVideosCount,
+          followingCount: user.followingCount,
+          collectedVideosCount: user.collectedVideosCount,
+        }
+        this.publishAccountSnapshot()
+        this.hideLogin()
+        this.setLoginSnapshot({ state: 'idle' })
+        return true
+      } catch {
+        // A failed profile probe is expected until QR authorization completes.
+        return false
       }
-      this.publishAccountSnapshot()
-      this.hideLogin()
-      this.setLoginSnapshot({ state: 'idle' })
-    } catch {
-      // A failed profile probe is expected until QR authorization completes.
+    })()
+    this.loginAccountProbe = probe
+    try {
+      return await probe
     } finally {
-      this.loginAccountPollPending = false
+      if (this.loginAccountProbe === probe) this.loginAccountProbe = undefined
     }
   }
 
@@ -771,8 +875,6 @@ export class DouyinTaskService {
       && snapshot.message === this.login.message
     ) return
     this.login = snapshot
-    if (snapshot.state === 'ready') this.loginQrCapturedAt = Date.now()
-    if (snapshot.state === 'idle') this.loginQrCapturedAt = 0
     this.publishLogin({ ...snapshot })
   }
 
@@ -785,9 +887,9 @@ export class DouyinTaskService {
     this.isLoadingMore = true
     this.publishSnapshot()
     try {
-      if (!this.secUserId) this.secUserId = (await this.client.getCurrentUser()).secUserId
+      if (!this.id) this.id = (await this.client.getCurrentUser()).id
       const cursor = this.nextCursor
-      const page = await this.client.loadFavorites(this.secUserId, cursor, FAVORITES_PAGE_SIZE)
+      const page = await this.loadVideos(this.id, cursor, this.config.pageSize)
       const found = new Map(this.videos.map((video) => [video.id, video]))
       for (const video of page.videos) found.set(video.id, video)
       this.videos = [...found.values()]
@@ -799,8 +901,8 @@ export class DouyinTaskService {
   }
 
   private async loadFirstPage() {
-    if (!this.secUserId) this.secUserId = (await this.client.getCurrentUser()).secUserId
-    return this.client.loadFavorites(this.secUserId, '0', FAVORITES_PAGE_SIZE)
+    if (!this.id) this.id = (await this.client.getCurrentUser()).id
+    return this.loadVideos(this.id, '0', this.config.pageSize)
   }
 
   private createSnapshot(selectedIds = new Set<string>()): TaskSnapshot {

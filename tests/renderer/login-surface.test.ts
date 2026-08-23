@@ -41,6 +41,17 @@ describe('Douyin login surface detection', () => {
     await expect(detectDouyinLoginSurface()).resolves.toEqual({ state: 'verification' })
   })
 
+  test('does not confuse the SMS-login tab with a security verification', async () => {
+    document.body.innerHTML = '<img src="data:image/png;base64,aA==">'
+    Object.defineProperty(document.body, 'innerText', { configurable: true, value: '扫码登录\n验证码登录' })
+    makeVisibleSquare(document.querySelector('img')!)
+
+    await expect(detectDouyinLoginSurface()).resolves.toEqual({
+      state: 'ready',
+      qrCode: 'data:image/png;base64,aA==',
+    })
+  })
+
   test('converts a supported remote QR image into a data URL', async () => {
     document.body.innerHTML = '<div class="qrcode"><img src="https://example.test/qr.png"></div>'
     makeVisibleSquare(document.querySelector('img')!)
@@ -66,6 +77,53 @@ describe('Douyin login surface detection', () => {
     })
   })
 
+  test('uses a visible canvas without a QR-specific class', async () => {
+    document.body.innerHTML = '<canvas></canvas>'
+    const canvas = document.querySelector('canvas')!
+    makeVisibleSquare(canvas)
+    vi.spyOn(canvas, 'toDataURL').mockReturnValue('data:image/png;base64,Y2FudmFz')
+
+    await expect(detectDouyinLoginSurface()).resolves.toEqual({
+      state: 'ready',
+      qrCode: 'data:image/png;base64,Y2FudmFz',
+    })
+  })
+
+  test("reads a QR image from Douyin's current QR-code container", async () => {
+    document.body.innerHTML = '<div id="animate_qrcode_container"><img src="data:image/png;base64,AAAA"></div>'
+    makeVisibleSquare(document.querySelector('img')!)
+
+    await expect(detectDouyinLoginSurface()).resolves.toEqual({
+      state: 'ready',
+      qrCode: 'data:image/png;base64,AAAA',
+    })
+  })
+
+  test('reads an unlabelled embedded QR image from the current login page', async () => {
+    document.body.innerHTML = '<div><img src="data:image/png;base64,AAAA"></div>'
+    Object.defineProperty(document.body, 'innerText', { configurable: true, value: '扫码登录' })
+    makeVisibleSquare(document.querySelector('img')!)
+
+    await expect(detectDouyinLoginSurface()).resolves.toEqual({
+      state: 'ready',
+      qrCode: 'data:image/png;base64,AAAA',
+    })
+  })
+
+  test('opens the QR-login tab instead of submitting the phone-login control', async () => {
+    document.body.innerHTML = '<div id="qr-tab">扫码登录</div><div id="phone-login">登录</div>'
+    const qrTab = document.querySelector<HTMLElement>('#qr-tab')!
+    const phoneLogin = document.querySelector<HTMLElement>('#phone-login')!
+    makeVisibleSquare(qrTab)
+    makeVisibleSquare(phoneLogin)
+    const openQrTab = vi.spyOn(qrTab, 'click')
+    const submitPhoneLogin = vi.spyOn(phoneLogin, 'click')
+
+    await expect(detectDouyinLoginSurface()).resolves.toEqual({ state: 'loading' })
+    expect(openQrTab).toHaveBeenCalledOnce()
+    expect(submitPhoneLogin).not.toHaveBeenCalled()
+  })
+
   test('refreshes an expired QR code and opens a plain login control', async () => {
     document.body.innerHTML = '<button>刷新</button>'
     Object.defineProperty(document.body, 'innerText', { configurable: true, value: '二维码已过期' })
@@ -75,8 +133,29 @@ describe('Douyin login surface detection', () => {
 
     document.body.innerHTML = '<div>Login</div>'
     Object.defineProperty(document.body, 'innerText', { configurable: true, value: '' })
-    const login = vi.spyOn(document.querySelector('div')!, 'click')
+    const loginControl = document.querySelector('div')!
+    makeVisibleSquare(loginControl)
+    const login = vi.spyOn(loginControl, 'click')
     await expect(detectDouyinLoginSurface()).resolves.toEqual({ state: 'loading' })
     expect(login).toHaveBeenCalledOnce()
+  })
+
+  test('opens a visible sign-in control when its label is nested', async () => {
+    document.body.innerHTML = '<button><span>登录</span></button>'
+    const login = vi.spyOn(document.querySelector('button')!, 'click')
+    makeVisibleSquare(document.querySelector('button')!)
+
+    await expect(detectDouyinLoginSurface()).resolves.toEqual({ state: 'loading' })
+    expect(login).toHaveBeenCalledOnce()
+  })
+
+  test('opens the account area when it is the only sign-in entry', async () => {
+    document.body.innerHTML = '<a>我的</a>'
+    const accountControl = document.querySelector('a')!
+    makeVisibleSquare(accountControl)
+    const openAccount = vi.spyOn(accountControl, 'click')
+
+    await expect(detectDouyinLoginSurface()).resolves.toEqual({ state: 'loading' })
+    expect(openAccount).toHaveBeenCalledOnce()
   })
 })
