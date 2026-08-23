@@ -102,7 +102,8 @@ export class PlatformFollowingTaskService {
         ? `Loaded ${this.accounts.length} following accounts.${this.hasMore ? ' Scroll down to load more.' : ''}`
         : 'No following accounts were returned.'
     } catch (error) {
-      this.state = 'paused'
+      // A read failure is retryable and must not masquerade as a paused mutation task.
+      this.state = 'idle'
       this.message = this.errorMessage(error)
     }
     this.publishSnapshot()
@@ -121,7 +122,7 @@ export class PlatformFollowingTaskService {
       if (!this.appendReplacementAccounts(this.pageSize)) await this.loadNextPage()
       this.message = `Loaded ${this.accounts.length} following accounts.${this.hasMore ? ' Scroll down to load more.' : ''}`
     } catch (error) {
-      if (previousState === 'ready') this.state = 'paused'
+      this.state = previousState
       this.message = this.errorMessage(error)
     }
     this.publishSnapshot()

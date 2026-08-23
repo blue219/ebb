@@ -18,7 +18,7 @@ Ebb is a development-stage Electron app for reviewing and bulk-removing liked vi
 - Pause, continue, or stop a removal task between API requests.
 - Use the interface in English or Chinese.
 
-TikTok uses an independent local browser session and the same three batch scopes as Douyin. Its private web contract remains a mandatory live release gate; see [TikTok private web contract](docs/tiktok-web-contract.md). Distributable installers are not implemented yet. `npm run build` produces application bundles, not an installer.
+TikTok uses an independent local browser session and the same three batch scopes as Douyin. Liked videos and Favorite Videos pass the current read-only live gate, while Following remains release-blocked because TikTok returns an empty response for the private following-list request. Ebb reports that contract error without locking workspace navigation and does not fall back to DOM automation or signature generation. See [TikTok private web contract](docs/tiktok-web-contract.md). Distributable installers are not implemented yet. `npm run build` produces application bundles, not an installer.
 
 ## Development baseline
 

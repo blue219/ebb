@@ -4,6 +4,8 @@
 
 TikTok support is implemented against the consumer web session hosted in the isolated Electron partition `persist:ebb-tiktok`. The contract remains a release-gated private integration: automated fixtures prove Ebb's parsing and task behavior, but they do not prove that TikTok's live, undocumented endpoints have remained stable.
 
+The read-only gate on August 24, 2026 confirmed liked videos and Favorite Videos against a signed-in account. Favorite Videos require the signed-in account's `secUid`. The following-list request returned an empty HTTP 200 response even with the secured user ID and TikTok's current standard browser-context parameters. Following and the complete TikTok milestone therefore remain release-blocked. Ebb keeps navigation recoverable and surfaces the contract error instead of treating it as an empty account.
+
 Do not describe the integration as an official TikTok developer integration. Login Kit, Research API, and Data Portability API do not provide the real-time read/write capabilities required by Ebb's removal workflows.
 
 ## Required live contract

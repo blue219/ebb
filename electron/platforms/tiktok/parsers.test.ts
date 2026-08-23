@@ -57,6 +57,9 @@ describe('TikTok private web response interface', () => {
     expect(() => assertTikTokMutationSuccess({ statusCode: 10201, statusMsg: 'verification required' })).toThrow(
       'TikTok web request was rejected: verification required',
     )
+    expect(() => assertTikTokMutationSuccess({ statusCode: 10202, statusMsg: '' })).toThrow(
+      'TikTok web request was rejected: status 10202',
+    )
   })
 
   it('preserves HTTP rejection details and rejects unreadable browser results', () => {
@@ -65,6 +68,9 @@ describe('TikTok private web response interface', () => {
       statusMsg: 'rate limited',
     })
     expect(() => parseTikTokBrowserResponse({ ok: false, status: 500 })).toThrow('unreadable web response')
+    expect(() => parseTikTokBrowserResponse({ ok: true, status: 200, text: '' })).toThrow(
+      'empty HTTP 200 response',
+    )
   })
 
   it('stops pagination when TikTok repeats or omits the cursor', () => {

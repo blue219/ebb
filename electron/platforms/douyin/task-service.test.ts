@@ -348,18 +348,18 @@ describe('Douyin removal task module', () => {
     expect(service.getTaskSnapshot().counts.failed).toBe(0)
   })
 
-  test('pauses scanning and pagination when loading fails', async () => {
+  test('keeps navigation recoverable when scanning or pagination fails', async () => {
     const { client, service } = createService()
     client.pages.push(new Error('first page unavailable'))
     await service.initialize()
     await service.scan()
-    expect(service.getTaskSnapshot()).toMatchObject({ state: 'paused', message: 'first page unavailable' })
+    expect(service.getTaskSnapshot()).toMatchObject({ state: 'idle', message: 'first page unavailable' })
 
     client.pages.push(page(['1'], '10', true))
     await service.scan()
     client.pages.push(new Error('next page unavailable'))
     await service.loadMore()
-    expect(service.getTaskSnapshot()).toMatchObject({ state: 'paused', message: 'next page unavailable' })
+    expect(service.getTaskSnapshot()).toMatchObject({ state: 'ready', message: 'next page unavailable' })
   })
 
   test('pauses All scope when a stale account count never yields another batch', async () => {

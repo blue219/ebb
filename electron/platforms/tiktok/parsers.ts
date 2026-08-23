@@ -37,6 +37,9 @@ export function parseTikTokBrowserResponse(result: unknown): JsonObject {
   if (!isObject(result) || typeof result.text !== 'string') {
     throw new Error('TikTok returned an unreadable web response.')
   }
+  if (!result.text.trim()) {
+    throw new Error(`TikTok returned an empty HTTP ${String(result.status)} response. Its private web contract may have changed.`)
+  }
   let payload: JsonObject
   try {
     const parsed: unknown = JSON.parse(result.text)
@@ -51,7 +54,7 @@ export function parseTikTokBrowserResponse(result: unknown): JsonObject {
 export function assertTikTokSuccess(payload: JsonObject) {
   const code = payload.statusCode ?? payload.status_code
   if (code === undefined || Number(code) === 0) return
-  const detail = readString(payload, 'statusMsg', 'status_msg', 'message') ?? `status ${String(code)}`
+  const detail = readString(payload, 'statusMsg', 'status_msg', 'message')?.trim() || `status ${String(code)}`
   throw new Error(`TikTok web request was rejected: ${detail}`)
 }
 

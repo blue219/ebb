@@ -147,4 +147,23 @@ describe('ElectronTikTokClient workspace', () => {
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     )
   })
+
+  test('scopes collected-video reads to the signed-in secured user ID', async () => {
+    const client = new ElectronTikTokClient(() => ({ isDestroyed: () => false }) as never)
+    electron.webContents.executeJavaScript.mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: JSON.stringify({ statusCode: 0, itemList: [], hasMore: false }),
+    })
+
+    await client.initialize()
+    await client.loadCollections('secured-user-1', '0', 30)
+
+    expect(electron.webContents.executeJavaScript).toHaveBeenLastCalledWith(
+      expect.stringContaining('secUid=secured-user-1'),
+    )
+    expect(electron.webContents.executeJavaScript).toHaveBeenLastCalledWith(
+      expect.stringContaining('AbortSignal.timeout(10_000)'),
+    )
+  })
 })

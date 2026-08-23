@@ -28,6 +28,7 @@ The automated layers cover:
 - Account checks, 30-row pagination, low-water prefetching, deduplication, selected/limited/all removal, replacement rows, completed-list refresh, pause, continue, stop, rejected requests, stale counts, sign out, and workspace crashes.
 - Collected-video parsing, pagination, selected/limited/live-all collection-removal tasks, and first-rejection pause behavior.
 - Following-account parsing, 20-row pagination, selected/limited/live-all unfollow tasks, and the shared mutation lock.
+- Read-only scan failures keep workspace navigation and manual retry available; only active or paused mutation tasks lock workspace switching.
 - Preload command/event mapping and main-process IPC registration.
 - QR sign-in presentation, scope selection and confirmation, progress controls, error presentation, language switching, and load-more de-duplication.
 - Electron startup, preload availability, sandbox settings, offline removal flow, and injected failure behavior.

@@ -256,7 +256,8 @@ export class PlatformTaskService {
         ? `Loaded ${this.videos.length} ${this.config.itemPluralLabel}.${this.hasMore ? ' Scroll down to load more.' : ''}`
         : this.config.emptyMessage
     } catch (error) {
-      this.state = 'paused'
+      // A read failure is retryable and must not masquerade as a paused mutation task.
+      this.state = 'idle'
       this.message = this.errorMessage(error)
     }
 
@@ -276,7 +277,7 @@ export class PlatformTaskService {
       if (!this.appendReplacementVideos(this.config.pageSize)) await this.loadNextPage()
       this.message = `Loaded ${this.videos.length} ${this.config.itemPluralLabel}.${this.hasMore ? ' Scroll down to load more.' : ''}`
     } catch (error) {
-      if (previousState === 'ready') this.state = 'paused'
+      this.state = previousState
       this.message = this.errorMessage(error)
     }
     this.publishSnapshot()

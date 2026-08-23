@@ -100,6 +100,25 @@ async function expectState(service: DouyinFollowingTaskService, state: Following
 }
 
 describe('Douyin following task module', () => {
+  test('keeps navigation recoverable when the first following page is rejected', async () => {
+    const { client, service } = createService()
+    client.pages.push(new Error('first page unavailable'))
+
+    await service.scan()
+
+    expect(service.getSnapshot()).toMatchObject({
+      state: 'idle',
+      mode: undefined,
+      message: 'first page unavailable',
+    })
+
+    client.pages.push(followingPage(['1'], '20', true), new Error('next page unavailable'))
+    await service.scan()
+    await service.loadMore()
+
+    expect(service.getSnapshot()).toMatchObject({ state: 'ready', message: 'next page unavailable' })
+  })
+
   test('loads 20-account pages and deduplicates stable IDs', async () => {
     const { client, service } = createService()
     client.pages.push(followingPage(['1', '2'], '10', true), followingPage(['2', '3']))

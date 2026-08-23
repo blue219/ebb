@@ -96,11 +96,12 @@ export class ElectronTikTokClient implements TikTokClient {
     return parseTikTokVideoPage(payload, cursor)
   }
 
-  async loadCollections(_userId: string, cursor: string, count: number) {
+  async loadCollections(userId: string, cursor: string, count: number) {
     const payload = await this.request('/api/user/collect/item_list/', {
       ...COMMON_QUERY,
       count: String(count),
       cursor,
+      secUid: userId,
     })
     return parseTikTokVideoPage(payload, cursor)
   }
@@ -160,6 +161,7 @@ export class ElectronTikTokClient implements TikTokClient {
           credentials: 'include',
           headers: { Accept: 'application/json, text/plain, */*' },
           method: ${JSON.stringify(method)},
+          signal: AbortSignal.timeout(10_000),
         })
         return { ok: response.ok, status: response.status, text: await response.text() }
       })()
