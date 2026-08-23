@@ -13,6 +13,11 @@ test('creates bounded and all-account removal plans', () => {
   expect(createAutomaticRemovalPlan(240, 240, 10)).toEqual({ mode: 'limited', total: 240 })
 })
 
+test('keeps unknown platform totals explicit without capping a requested limit to loaded rows', () => {
+  expect(createAutomaticRemovalPlan(undefined, undefined, 10)).toEqual({ mode: 'all', total: null })
+  expect(createAutomaticRemovalPlan(50, undefined, 10)).toEqual({ mode: 'limited', total: 50 })
+})
+
 test('rejects invalid and excessive limits', () => {
   expect(() => createAutomaticRemovalPlan(0, 20, 10)).toThrow(/positive integer/)
   expect(() => createAutomaticRemovalPlan(1.5, 20, 10)).toThrow(/positive integer/)

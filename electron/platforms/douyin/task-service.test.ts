@@ -163,8 +163,8 @@ describe('Douyin removal task module', () => {
 
     service.start(['1'])
     await expectTaskState(service, 'paused')
-    expect(coordinator.currentOwner()).toBe('likes')
-    expect(() => coordinator.acquire('following')).toThrow(/liked-video task is active/i)
+    expect(coordinator.currentOwner()).toBe('douyin:likes')
+    expect(() => coordinator.acquire('douyin:following')).toThrow(/liked-video task is active/i)
 
     service.stop()
     expect(coordinator.currentOwner()).toBeUndefined()
@@ -307,6 +307,23 @@ describe('Douyin removal task module', () => {
     expect(client.favoriteRequests).toHaveLength(3)
   })
 
+  test('keeps All progress open-ended when the platform does not report a total', async () => {
+    const { client, service } = createService()
+    client.user = { id: 'account-1', name: 'Sky' }
+    client.pages.push(page(['1', '2']), page([]))
+    await service.initialize()
+    await service.scan()
+
+    await service.startAll()
+    await expectTaskState(service, 'completed')
+
+    expect(client.unlikeAttempts).toEqual(['1', '2'])
+    expect(service.getTaskSnapshot()).toMatchObject({
+      mode: 'all',
+      progress: { completed: 2, total: null },
+    })
+  })
+
   test('shrinks a limited target when the account exhausts early', async () => {
     const { client, service } = createService()
     client.pages.push(page(['1']), page([]))
@@ -389,7 +406,7 @@ describe('Douyin removal task module', () => {
       service.start(['1', '2'])
       await vi.waitFor(() => expect(client.unlikeAttempts).toEqual(['1']))
       service[action]()
-      if (action === 'stop') expect(coordinator.currentOwner()).toBe('likes')
+      if (action === 'stop') expect(coordinator.currentOwner()).toBe('douyin:likes')
       releaseUnlike()
       await vi.waitFor(() => expect(service.getTaskSnapshot().progress.completed).toBe(1))
 

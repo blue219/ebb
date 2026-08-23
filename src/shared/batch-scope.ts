@@ -10,13 +10,15 @@ type SelectableItem = {
 
 export const DEFAULT_BATCH_SCOPE: BatchScope = { kind: 'all' }
 
-export function clampBatchLimit(value: number, totalItems: number) {
+export function clampBatchLimit(value: number, totalItems?: number) {
+  const normalized = Math.max(Math.trunc(value), 1)
+  if (totalItems === undefined) return normalized
   if (totalItems <= 0) return 0
-  return Math.min(Math.max(Math.trunc(value), 1), totalItems)
+  return Math.min(normalized, totalItems)
 }
 
-export function getBatchTarget(scope: BatchScope, totalItems: number, manualCount: number) {
-  if (scope.kind === 'all') return Math.max(0, totalItems)
+export function getBatchTarget(scope: BatchScope, totalItems: number | undefined, manualCount: number) {
+  if (scope.kind === 'all') return Math.max(0, totalItems ?? 0)
   if (scope.kind === 'limit') return clampBatchLimit(scope.limit, totalItems)
   return Math.max(0, manualCount)
 }

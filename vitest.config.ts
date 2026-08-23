@@ -16,6 +16,7 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'html'],
       include: [
+        'shared/platforms/contracts.ts',
         'src/shared/**/*.ts',
         'electron/shared/**/*.ts',
         'electron/platforms/douyin/policy.ts',
@@ -26,8 +27,11 @@ export default defineConfig({
         'electron/platforms/douyin/task-service.ts',
         'electron/platforms/douyin/preload-bridge.ts',
         'electron/platforms/douyin/ipc-handlers.ts',
+        'electron/platforms/tiktok/policy.ts',
+        'electron/platforms/tiktok/login-surface.ts',
+        'electron/platforms/tiktok/parsers.ts',
       ],
-      exclude: ['**/*.test.ts', '**/*.test.tsx'],
+      exclude: ['**/*.test.ts', '**/*.test.tsx', 'src/shared/platforms/**/*.tsx'],
       thresholds: {
         lines: 80,
         statements: 80,

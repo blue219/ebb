@@ -9,7 +9,9 @@ import type {
   TaskSnapshot,
 } from '../../shared/platforms/douyin/contracts.js'
 import { DOUYIN_IPC_CHANNELS } from '../../shared/platforms/douyin/contracts.js'
+import { TIKTOK_IPC_CHANNELS } from '../../shared/platforms/tiktok/contracts.js'
 import { registerDouyinIpcHandlers } from '../../electron/platforms/douyin/ipc-handlers.js'
+import { registerPlatformIpcHandlers } from '../../electron/shared/platforms/ipc-handlers.js'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 const projectRoot = join(currentDirectory, '..')
@@ -59,9 +61,12 @@ let collectionTask: TaskSnapshot = {
   isRefreshingCompletedList: false,
 }
 
-const publishTask = () => mainWindow?.webContents.send(DOUYIN_IPC_CHANNELS.status, task)
-const publishFollowingTask = () => mainWindow?.webContents.send(DOUYIN_IPC_CHANNELS.following.status, followingTask)
-const publishCollectionTask = () => mainWindow?.webContents.send(DOUYIN_IPC_CHANNELS.collection.status, collectionTask)
+const fixtureChannels = [DOUYIN_IPC_CHANNELS, TIKTOK_IPC_CHANNELS]
+const publishAccount = () => fixtureChannels.forEach((channels) => mainWindow?.webContents.send(channels.account, account))
+const publishLogin = () => fixtureChannels.forEach((channels) => mainWindow?.webContents.send(channels.login, login))
+const publishTask = () => fixtureChannels.forEach((channels) => mainWindow?.webContents.send(channels.status, task))
+const publishFollowingTask = () => fixtureChannels.forEach((channels) => mainWindow?.webContents.send(channels.following.status, followingTask))
+const publishCollectionTask = () => fixtureChannels.forEach((channels) => mainWindow?.webContents.send(channels.collection.status, collectionTask))
 const beginTask = (mode: 'selected' | 'limited' | 'all', total: number) => {
   if (scenario === 'error') {
     task = {
@@ -92,7 +97,7 @@ const likedVideoController = {
   getLoginSnapshot: () => login,
   async showLogin() {
     login = { state: 'ready', qrCode: 'data:image/png;base64,aA==' }
-    mainWindow?.webContents.send(DOUYIN_IPC_CHANNELS.login, login)
+    publishLogin()
   },
   async refreshLogin() {},
   hideLogin() {},
@@ -122,7 +127,7 @@ const likedVideoController = {
       }
       account = { ...account, likedVideosCount: Math.max(0, (account.likedVideosCount ?? 0) - completed) }
       publishTask()
-      mainWindow?.webContents.send(DOUYIN_IPC_CHANNELS.account, account)
+      publishAccount()
     }, 30)
   },
   stop() {
@@ -132,7 +137,7 @@ const likedVideoController = {
   async signOut() {
     account = { state: 'signedOut' }
     task = { ...task, state: 'idle', videos: [], counts: { loaded: 0, selected: 0, completed: 0, failed: 0 } }
-    mainWindow?.webContents.send(DOUYIN_IPC_CHANNELS.account, account)
+    publishAccount()
     publishTask()
   },
   resetForSignOut() {},
@@ -153,7 +158,7 @@ const collectionController = {
       collectionTask = { ...collectionTask, state: 'completed', videos: collectionTask.videos.map((item) => selectedIds.includes(item.id) ? { ...item, status: 'completed' } : item), counts: { ...collectionTask.counts, completed: total, failed: 0 }, progress: { completed: total, total }, message: 'Offline collection fixture completed.' }
       account = { ...account, collectedVideosCount: Math.max(0, (account.collectedVideosCount ?? 0) - total) }
       publishCollectionTask()
-      mainWindow?.webContents.send(DOUYIN_IPC_CHANNELS.account, account)
+      publishAccount()
     }, 30)
   },
   async startAll(limit?: number) { this.start(collectionTask.videos.slice(0, limit ?? collectionTask.videos.length).map((item) => item.id)) },
@@ -207,7 +212,7 @@ const followingController = {
       }
       account = { ...account, followingCount: Math.max(0, (account.followingCount ?? 0) - total) }
       publishFollowingTask()
-      mainWindow?.webContents.send(DOUYIN_IPC_CHANNELS.account, account)
+      publishAccount()
     }, 30)
   },
   async startAll(limit?: number) {
@@ -235,6 +240,7 @@ const followingController = {
 }
 
 registerDouyinIpcHandlers(ipcMain, likedVideoController, followingController, collectionController)
+registerPlatformIpcHandlers(ipcMain, TIKTOK_IPC_CHANNELS, likedVideoController, followingController, collectionController)
 
 app.whenReady().then(async () => {
   session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (_details, callback) => {

@@ -135,7 +135,7 @@ describe('Douyin following task module', () => {
     service.start(['1', '2'])
     await expectState(service, 'paused')
     expect(client.unfollowAttempts).toEqual(['1'])
-    expect(coordinator.currentOwner()).toBe('following')
+    expect(coordinator.currentOwner()).toBe('douyin:following')
 
     service.resume(['1', '2'])
     await expectState(service, 'completed')
@@ -227,13 +227,13 @@ describe('Douyin following task module', () => {
       service.start(['1', '2'])
       await vi.waitFor(() => expect(client.unfollowAttempts).toEqual(['1']))
       service[action]()
-      if (action === 'stop') expect(coordinator.currentOwner()).toBe('following')
+      if (action === 'stop') expect(coordinator.currentOwner()).toBe('douyin:following')
       releaseUnfollow()
       await vi.waitFor(() => expect(service.getSnapshot().progress.completed).toBe(1))
 
       expect(client.unfollowAttempts).toEqual(['1'])
       expect(service.getSnapshot().state).toBe(action === 'pause' ? 'paused' : 'stopped')
-      expect(coordinator.currentOwner()).toBe(action === 'pause' ? 'following' : undefined)
+      expect(coordinator.currentOwner()).toBe(action === 'pause' ? 'douyin:following' : undefined)
     }
   })
 
@@ -252,7 +252,7 @@ describe('Douyin following task module', () => {
     const { client, coordinator, service } = createService()
     client.pages.push(followingPage(['1']))
     await service.scan()
-    coordinator.acquire('likes')
+    coordinator.acquire('douyin:likes')
 
     expect(() => service.start(['1'])).toThrow(/liked-video task is active/i)
   })

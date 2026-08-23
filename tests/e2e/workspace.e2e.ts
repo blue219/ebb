@@ -29,6 +29,7 @@ async function expectIsolatedWindow(electronApp: ElectronApplication, page: Page
   await expect(page.getByRole('checkbox', { name: 'Offline first video' })).toBeVisible()
   await expect(page.locator('vite-error-overlay')).toHaveCount(0)
   expect(await page.evaluate(() => typeof window.ebb?.douyin?.getState)).toBe('function')
+  expect(await page.evaluate(() => typeof window.ebb?.tiktok?.getState)).toBe('function')
   expect(await page.evaluate(() => typeof (window as Window & { process?: unknown }).process)).toBe('undefined')
 
   const preferences = await electronApp.evaluate(({ BrowserWindow }) => {
@@ -42,6 +43,25 @@ async function expectIsolatedWindow(electronApp: ElectronApplication, page: Page
   expect(preferences?.nodeIntegration).toBe(false)
   expect(preferences?.sandbox).toBe(true)
 }
+
+test('switches to the offline TikTok workspace through the production preload bridge', async ({ browserName: _browserName }, testInfo) => {
+  const { electronApp, runtimeErrors, window } = await launchFixture(testInfo.outputDir, 'success')
+  try {
+    await expectIsolatedWindow(electronApp, window)
+    await window.getByRole('button', { name: 'TikTok' }).click()
+    await expect(window.getByRole('checkbox', { name: 'Offline first video' })).toBeVisible()
+    await expect(window.getByRole('group', { name: 'TikTok workspace' })).toBeVisible()
+    await expect(window.getByRole('button', { name: 'TikTok' })).toHaveAttribute('aria-pressed', 'true')
+
+    const externalRequests = await electronApp.evaluate(() => (
+      (globalThis as typeof globalThis & { getEbbExternalRequestCount: () => number }).getEbbExternalRequestCount()
+    ))
+    expect(externalRequests).toBe(0)
+    expect(runtimeErrors).toEqual([])
+  } finally {
+    await electronApp.close()
+  }
+})
 
 test('runs an offline manual removal through pause, continue, and completion', async ({ browserName: _browserName }, testInfo) => {
   const { electronApp, runtimeErrors, window } = await launchFixture(testInfo.outputDir, 'success')

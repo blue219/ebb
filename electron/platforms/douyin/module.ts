@@ -1,60 +1,20 @@
-import { ipcMain, type BrowserWindow } from 'electron'
+import type { BrowserWindow } from 'electron'
 
 import { DOUYIN_IPC_CHANNELS } from '../../../shared/platforms/douyin/contracts.js'
+import { DOUYIN_RUNTIME_CONFIG } from '../../shared/platforms/client.js'
+import { createPlatformModule } from '../../shared/platforms/module.js'
+import { PlatformMutationCoordinator } from '../../shared/platforms/mutation-coordinator.js'
 import { ElectronDouyinClient } from './electron-client.js'
-import { DouyinFollowingTaskService } from './following-task-service.js'
-import { registerDouyinIpcHandlers } from './ipc-handlers.js'
-import { DouyinTaskService } from './task-service.js'
-import { DouyinMutationCoordinator } from './mutation-coordinator.js'
 
-export function createDouyinPlatformModule(getHostWindow: () => BrowserWindow | undefined) {
-  const client = new ElectronDouyinClient(getHostWindow)
-  const mutationCoordinator = new DouyinMutationCoordinator()
-  const taskService = new DouyinTaskService(client, (snapshot) => {
-    getHostWindow()?.webContents.send(DOUYIN_IPC_CHANNELS.status, snapshot)
-  }, (account) => {
-    getHostWindow()?.webContents.send(DOUYIN_IPC_CHANNELS.account, account)
-  }, (login) => {
-    getHostWindow()?.webContents.send(DOUYIN_IPC_CHANNELS.login, login)
-  }, undefined, mutationCoordinator)
-  const followingTaskService = new DouyinFollowingTaskService(
-    client,
-    {
-      getSnapshot: () => taskService.getAccountSnapshot(),
-      requireSignedInUserId: () => taskService.requireSignedInUserId(),
-      decrementFollowingCount: () => taskService.decrementFollowingCount(),
-    },
+export function createDouyinPlatformModule(
+  getHostWindow: () => BrowserWindow | undefined,
+  mutationCoordinator: PlatformMutationCoordinator = new PlatformMutationCoordinator(),
+) {
+  return createPlatformModule({
+    channels: DOUYIN_IPC_CHANNELS,
+    client: new ElectronDouyinClient(getHostWindow),
+    getHostWindow,
     mutationCoordinator,
-    (snapshot) => {
-      getHostWindow()?.webContents.send(DOUYIN_IPC_CHANNELS.following.status, snapshot)
-    },
-  )
-  const collectionTaskService = new DouyinTaskService(
-    client,
-    (snapshot) => {
-      getHostWindow()?.webContents.send(DOUYIN_IPC_CHANNELS.collection.status, snapshot)
-    },
-    (account) => {
-      getHostWindow()?.webContents.send(DOUYIN_IPC_CHANNELS.account, account)
-    },
-    () => {},
-    undefined,
-    mutationCoordinator,
-    { kind: 'collections', ownsClient: false },
-  )
-  const stopFollowingCrashListener = client.onWorkspaceCrash(() => followingTaskService.handleWorkspaceCrash())
-  const stopCollectionCrashListener = client.onWorkspaceCrash(() => collectionTaskService.handleWorkspaceCrash())
-
-  registerDouyinIpcHandlers(ipcMain, taskService, followingTaskService, collectionTaskService)
-
-  return {
-    initialize: (_hostWindow: BrowserWindow) => taskService.initialize(),
-    dispose: () => {
-      stopFollowingCrashListener()
-      stopCollectionCrashListener()
-      followingTaskService.dispose()
-      collectionTaskService.dispose()
-      taskService.dispose()
-    },
-  }
+    runtime: DOUYIN_RUNTIME_CONFIG,
+  })
 }

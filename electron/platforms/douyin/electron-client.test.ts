@@ -71,4 +71,20 @@ describe('ElectronDouyinClient login', () => {
     expect(electron.partitionSession.fetch).toHaveBeenCalledOnce()
     expect(electron.webContents.executeJavaScript).not.toHaveBeenCalled()
   })
+
+  test('embeds form request data without referencing main-process variables in the page script', async () => {
+    const client = new ElectronDouyinClient(() => ({ isDestroyed: () => false }) as never)
+    await client.refreshLogin()
+    electron.webContents.executeJavaScript.mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: JSON.stringify({ status_code: 0 }),
+    })
+
+    await client.unlike('video-1')
+
+    const script = String(electron.webContents.executeJavaScript.mock.calls.at(-1)?.[0])
+    expect(script).toContain('aweme_id=video-1')
+    expect(script).not.toContain('requestBody ?')
+  })
 })

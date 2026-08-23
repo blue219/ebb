@@ -49,6 +49,7 @@ export const copy = {
     clearAmount: 'Number of likes to clear',
     quickSelect: 'Quick select',
     amountHint: 'Enter 1–{count}',
+    amountHintUnknown: 'Enter any positive whole number',
     reset: 'Reset',
     title: 'Title',
     account: 'Account',
@@ -56,6 +57,7 @@ export const copy = {
     relationship: 'Relationship',
     mutual: 'Mutual',
     followingOnly: 'Following',
+    relationshipUnknown: 'Unknown',
     status: 'Status',
     statusPending: 'Ready',
     statusProcessing: 'Working',
@@ -68,6 +70,8 @@ export const copy = {
     stop: 'Stop',
     signOut: 'Sign out',
     clearLikes: 'Clear {count} likes',
+    clearAllLikes: 'Clear all likes',
+    processedCount: 'Processed {count}',
     unfollowAmount: 'Number of accounts to unfollow',
     uncollectAmount: 'Number of collected videos to remove',
     uncollectVideos: 'Remove {count} collected videos',
@@ -90,6 +94,7 @@ export const copy = {
     emptyFollowingBody: 'Open this workspace after sign-in to load the first 20 following accounts.',
     removing: 'Removing',
     confirmClearTitle: 'Clear {count} likes?',
+    confirmAllLikesTitle: 'Clear all likes?',
     confirmManualBody: 'This will clear the {count} likes selected in the table. Ebb stops immediately if Douyin reports a problem.',
     confirmLimitBody: 'This will clear up to {count} likes, loading more videos as needed. Ebb stops immediately if Douyin reports a problem.',
     confirmAllBody: 'This cannot be undone. Ebb will keep loading new batches and removing likes until none remain, pausing automatically if Douyin reports a problem.',
@@ -172,6 +177,7 @@ export const copy = {
     clearAmount: '要清除的点赞数量',
     quickSelect: '快速选择',
     amountHint: '请输入 1–{count}',
+    amountHintUnknown: '请输入任意正整数',
     reset: '重置',
     title: '标题',
     account: '账号',
@@ -179,6 +185,7 @@ export const copy = {
     relationship: '关系',
     mutual: '互相关注',
     followingOnly: '已关注',
+    relationshipUnknown: '未知',
     status: '状态',
     statusPending: '待处理',
     statusProcessing: '处理中',
@@ -191,6 +198,8 @@ export const copy = {
     stop: '停止',
     signOut: '退出登录',
     clearLikes: '清除 {count} 个点赞',
+    clearAllLikes: '清除全部点赞',
+    processedCount: '已处理 {count}',
     unfollowAmount: '要取消关注的账号数量',
     uncollectAmount: '要取消收藏的视频数量',
     uncollectVideos: '取消收藏 {count} 个视频',
@@ -213,6 +222,7 @@ export const copy = {
     emptyFollowingBody: '登录后打开此工作区，即会加载前 20 个关注账号。',
     removing: '取消中',
     confirmClearTitle: '清除 {count} 个点赞？',
+    confirmAllLikesTitle: '清除全部点赞？',
     confirmManualBody: '这会清除表格中选中的 {count} 个点赞。抖音返回异常时，Ebb 会立即停止。',
     confirmLimitBody: '这会清除最多 {count} 个点赞，并按需继续加载视频。抖音返回异常时，Ebb 会立即停止。',
     confirmAllBody: '此操作无法撤销。Ebb 会持续获取新批次并逐条取消点赞，直到全部完成；抖音返回异常时会自动暂停。',
@@ -248,3 +258,18 @@ export const copy = {
     },
   },
 } as const
+
+const replacePlatformName = <T,>(value: T): T => {
+  if (typeof value === 'string') return value.replaceAll('Douyin', 'TikTok').replaceAll('抖音', 'TikTok') as T
+  if (Array.isArray(value)) return value.map(replacePlatformName) as T
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, replacePlatformName(item)])) as T
+  }
+  return value
+}
+
+const tiktokCopy = replacePlatformName(copy)
+
+export const getPlatformCopy = (locale: Locale, platform: 'douyin' | 'tiktok') => (
+  platform === 'douyin' ? copy[locale] : tiktokCopy[locale]
+)

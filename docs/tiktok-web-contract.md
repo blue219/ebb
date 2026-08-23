@@ -29,6 +29,8 @@ Use exactly one expendable item for each mutation check. Never use an **All** sc
 
 Committed fixtures may contain only the minimum response fields needed to exercise defensive parsers. Replace account names, user IDs, video IDs, image URLs, request IDs, cursor values, and messages that could identify the account. Never commit request headers, cookies, CSRF values, device identifiers, signed URLs, or raw network captures.
 
+`tests/fixtures/tiktok/private-web-contract.candidate.json` is a synthetic, sanitized candidate contract used by deterministic tests. It must not be relabeled as live-verified until the complete read/write gate above passes against a real account; after verification, update only its field structure and keep all identifying values synthetic.
+
 ## First-party references
 
 - [Login Kit QR Code Authorization](https://developers.tiktok.com/docs/en/login-kit-qr-code-authorization)

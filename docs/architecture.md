@@ -20,6 +20,7 @@ React renderer
 - `electron/preload.ts` exposes the narrow `window.ebb` API.
 - Shared task modules own account checks and liked-video, collected-video, and following-account task behavior through an injected `PlatformClient` interface.
 - `ElectronDouyinClient` and `ElectronTikTokClient` are production adapters. Each owns an isolated persistent partition and a sandboxed `WebContentsView` hosted in a `show: false` window.
+- The hidden TikTok workspace is muted, background-throttled, and pauses page media playback while preserving its first-party browser context for account operations.
 - Platform modules initialize lazily when their renderer workspace is first opened.
 
 ## Directory ownership
@@ -81,7 +82,7 @@ Changing the partition name or renderer key is a session migration and must be p
 - The preload bridge exposes typed operations rather than raw `ipcRenderer` access.
 - Each workspace denies new windows, restricts top-level navigation to its platform hosts, and blocks unsafe subframe protocols.
 - QR images must be bounded PNG, JPEG, or WebP data URLs before they reach the renderer.
-- Current-account probes use Electron's fetch bound to `persist:ebb-douyin`, so login-page navigation cannot strand authentication polling. List and mutation requests still execute inside the isolated workspace so Douyin receives the expected browser context and session cookies.
+- Current-account probes use Electron's fetch bound to the matching persistent platform partition, so login-page navigation cannot strand authentication polling. List and mutation requests still execute inside the isolated workspace so each platform receives the expected browser context and session cookies.
 
 The integration depends on a private external API and must treat every response as untrusted. Keep payload parsing defensive and pause mutation work on rejected responses.
 

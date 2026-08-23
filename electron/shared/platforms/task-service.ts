@@ -1,64 +1,65 @@
 import type {
   AccountSnapshot,
-  DouyinVideo,
+  VideoItem,
   LoginSnapshot,
   TaskCounts,
   TaskMode,
   TaskSnapshot,
   TaskState,
-} from '../../../shared/platforms/douyin/contracts.js'
-import { AUTOMATIC_PREFETCH_THRESHOLD, COLLECTIONS_PAGE_SIZE, FAVORITES_PAGE_SIZE } from './policy.js'
-import type { DouyinClient } from './client.js'
-import { DouyinMutationCoordinator, type DouyinMutationOwner } from './mutation-coordinator.js'
+} from '../../../shared/platforms/contracts.js'
+import {
+  DOUYIN_RUNTIME_CONFIG,
+  type PlatformClient,
+  type PlatformRuntimeConfig,
+} from './client.js'
+import { PlatformMutationCoordinator, type PlatformMutationKind } from './mutation-coordinator.js'
 import {
   createAutomaticRemovalPlan,
   hasReachedAutomaticTarget,
   remainingAutomaticTarget,
-} from '../../shared/removal-policy.js'
+} from '../removal-policy.js'
 
 type StatusPublisher = (snapshot: TaskSnapshot) => void
 type AccountPublisher = (snapshot: AccountSnapshot) => void
 type LoginPublisher = (snapshot: LoginSnapshot) => void
 
-export type DouyinVideoTaskKind = 'likes' | 'collections'
+export type VideoItemTaskKind = 'likes' | 'collections'
 
-export interface DouyinVideoTaskOptions {
-  kind?: DouyinVideoTaskKind
+export interface VideoItemTaskOptions {
+  kind?: VideoItemTaskKind
   ownsClient?: boolean
+  runtime?: PlatformRuntimeConfig
 }
 
 const videoTaskConfig = {
   likes: {
     accountCount: 'likedVideosCount',
-    emptyMessage: 'No liked videos were returned. Confirm that the saved Douyin account is signed in, then scan again.',
     itemLabel: 'liked video',
     itemPluralLabel: 'liked videos',
-    owner: 'likes',
-    pageSize: FAVORITES_PAGE_SIZE,
+    ownerKind: 'likes',
+    pageSize: 'favoritesPageSize',
     taskLabel: 'like',
   },
   collections: {
     accountCount: 'collectedVideosCount',
-    emptyMessage: 'No collected videos were returned. Confirm that the saved Douyin account is signed in, then scan again.',
     itemLabel: 'collected video',
     itemPluralLabel: 'collected videos',
-    owner: 'collections',
-    pageSize: COLLECTIONS_PAGE_SIZE,
+    ownerKind: 'collections',
+    pageSize: 'collectionsPageSize',
     taskLabel: 'collection',
   },
-} as const satisfies Record<DouyinVideoTaskKind, {
+} as const satisfies Record<VideoItemTaskKind, {
   accountCount: 'likedVideosCount' | 'collectedVideosCount'
-  emptyMessage: string
   itemLabel: string
   itemPluralLabel: string
-  owner: DouyinMutationOwner
-  pageSize: number
+  ownerKind: PlatformMutationKind
+  pageSize: 'favoritesPageSize' | 'collectionsPageSize'
   taskLabel: string
 }>
 
 const sleep = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds))
 
-export class DouyinTaskService {
+export class PlatformTaskService {
   private loginPoll?: NodeJS.Timeout
   private loginAccountPoll?: NodeJS.Timeout
   private loginPollPending = false
@@ -67,7 +68,7 @@ export class DouyinTaskService {
   private loginVisible = false
   private stopCrashListener?: () => void
   private state: TaskState = 'idle'
-  private videos: DouyinVideo[] = []
+  private videos: VideoItem[] = []
   private currentVideoId?: string
   private nextCursor = '0'
   private hasMore = false
@@ -80,29 +81,30 @@ export class DouyinTaskService {
   private taskMode?: TaskMode
   private taskIds = new Set<string>()
   private taskProcessedIds = new Set<string>()
-  private replacementVideos: DouyinVideo[] = []
+  private replacementVideos: VideoItem[] = []
   private automaticPrefetch?: Promise<void>
   private automaticPrefetchGeneration = 0
   private taskCompleted = 0
-  private taskTotal = 0
+  private taskTotal: number | null = 0
   private readonly publish: StatusPublisher
   private readonly publishAccount: AccountPublisher
   private readonly publishLogin: LoginPublisher
-  private readonly client: DouyinClient
+  private readonly client: PlatformClient
   private readonly wait: (milliseconds: number) => Promise<void>
-  private readonly mutationCoordinator: DouyinMutationCoordinator
-  private readonly options: Required<DouyinVideoTaskOptions>
+  private readonly mutationCoordinator: PlatformMutationCoordinator
+  private readonly options: Required<Omit<VideoItemTaskOptions, 'runtime'>>
+  private readonly runtime: PlatformRuntimeConfig
   private account: AccountSnapshot = { state: 'checking' }
   private login: LoginSnapshot = { state: 'idle' }
 
   constructor(
-    client: DouyinClient,
+    client: PlatformClient,
     publish: StatusPublisher,
     publishAccount: AccountPublisher,
     publishLogin: LoginPublisher,
     wait: (milliseconds: number) => Promise<void> = sleep,
-    mutationCoordinator: DouyinMutationCoordinator = new DouyinMutationCoordinator(),
-    options: DouyinVideoTaskOptions = {},
+    mutationCoordinator: PlatformMutationCoordinator = new PlatformMutationCoordinator(),
+    options: VideoItemTaskOptions = {},
   ) {
     this.client = client
     this.publish = publish
@@ -111,10 +113,17 @@ export class DouyinTaskService {
     this.wait = wait
     this.mutationCoordinator = mutationCoordinator
     this.options = { kind: options.kind ?? 'likes', ownsClient: options.ownsClient ?? true }
+    this.runtime = options.runtime ?? DOUYIN_RUNTIME_CONFIG
   }
 
   private get config() {
-    return videoTaskConfig[this.options.kind]
+    const config = videoTaskConfig[this.options.kind]
+    return {
+      ...config,
+      emptyMessage: `No ${config.itemPluralLabel} were returned. Confirm that the saved ${this.runtime.displayName} account is signed in, then scan again.`,
+      owner: `${this.runtime.id}:${config.ownerKind}` as const,
+      pageSize: this.runtime[config.pageSize],
+    }
   }
 
   private get accountItemCount() {
@@ -221,8 +230,8 @@ export class DouyinTaskService {
 
   handleWorkspaceCrash() {
     this.stopLoginPolling()
-    this.setLoginSnapshot({ state: 'error', message: 'The Douyin sign-in process stopped unexpectedly.' })
-    this.account = { state: 'signedOut', message: 'The Douyin sign-in page stopped unexpectedly. Try again.' }
+    this.setLoginSnapshot({ state: 'error', message: `The ${this.runtime.displayName} sign-in process stopped unexpectedly.` })
+    this.account = { state: 'signedOut', message: `The ${this.runtime.displayName} sign-in page stopped unexpectedly. Try again.` }
     this.publishAccountSnapshot()
     this.mutationCoordinator.release(this.config.owner)
   }
@@ -302,7 +311,7 @@ export class DouyinTaskService {
       if (selected.has(video.id) && video.status !== 'completed') video.status = 'pending'
     }
     this.state = 'running'
-    this.message = `Removing ${this.config.itemPluralLabel} through the Douyin web API.`
+    this.message = `Removing ${this.config.itemPluralLabel} through the ${this.runtime.displayName} web API.`
     this.publishSnapshot(selected)
     void this.processQueue(selected)
   }
@@ -401,7 +410,7 @@ export class DouyinTaskService {
     this.state = 'idle'
     this.resetTask()
     this.videos = []
-    this.message = 'Signed out from Douyin on this device.'
+    this.message = `Signed out from ${this.runtime.displayName} on this device.`
     this.publishSnapshot()
   }
 
@@ -414,7 +423,7 @@ export class DouyinTaskService {
     this.hasMore = false
     this.isRefreshingCompletedList = false
     this.resetTask()
-    this.message = 'Signed out from Douyin on this device.'
+    this.message = `Signed out from ${this.runtime.displayName} on this device.`
     this.publishSnapshot()
   }
 
@@ -565,7 +574,7 @@ export class DouyinTaskService {
       return
     }
 
-    throw new Error(`Douyin still reports ${this.config.itemPluralLabel} but did not return a new batch. Continue to retry.`)
+    throw new Error(`${this.runtime.displayName} still reports ${this.config.itemPluralLabel} but did not return a new batch. Continue to retry.`)
   }
 
   private async refillAutomaticQueue() {
@@ -590,7 +599,7 @@ export class DouyinTaskService {
 
     const pendingCount = this.videos.filter((video) => video.status !== 'completed').length
     const remaining = remainingAutomaticTarget(this.taskMode, this.taskCompleted, this.taskTotal)
-    if (pendingCount > AUTOMATIC_PREFETCH_THRESHOLD || remaining <= pendingCount) return
+    if (pendingCount > this.runtime.videoPrefetchThreshold || remaining <= pendingCount) return
 
     const generation = this.automaticPrefetchGeneration
     const prefetch = this.prefetchAutomaticPage(generation)
@@ -640,8 +649,8 @@ export class DouyinTaskService {
       remainingAutomaticTarget(this.taskMode, this.taskCompleted, this.taskTotal),
     )
     let keptPending = 0
-    const retained: DouyinVideo[] = []
-    const overflow: DouyinVideo[] = []
+    const retained: VideoItem[] = []
+    const overflow: VideoItem[] = []
     for (const video of this.videos) {
       if (video.status === 'completed' || keptPending < desiredCount) {
         retained.push(video)
@@ -659,7 +668,7 @@ export class DouyinTaskService {
     this.state = 'completed'
     this.currentVideoId = undefined
     if (mode === 'limited') {
-      if (exhausted && this.taskCompleted < this.taskTotal) this.taskTotal = this.taskCompleted
+      if (exhausted && this.taskTotal !== null && this.taskCompleted < this.taskTotal) this.taskTotal = this.taskCompleted
       this.message = `Removed ${this.taskCompleted} ${this.config.itemPluralLabel}.`
     } else {
       this.hasMore = false
@@ -718,7 +727,7 @@ export class DouyinTaskService {
     return appended
   }
 
-  private bufferReplacementVideos(videos: DouyinVideo[]) {
+  private bufferReplacementVideos(videos: VideoItem[]) {
     const knownIds = new Set([
       ...this.videos.map((video) => video.id),
       ...this.replacementVideos.map((video) => video.id),

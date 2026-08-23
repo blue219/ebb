@@ -1,25 +1,4 @@
-export type DouyinMutationOwner = 'likes' | 'following' | 'collections'
-
-export class DouyinMutationCoordinator {
-  private owner?: DouyinMutationOwner
-
-  acquire(owner: DouyinMutationOwner) {
-    if (this.owner && this.owner !== owner) {
-      const activeTask = this.owner === 'likes'
-        ? 'liked-video'
-        : this.owner === 'following'
-          ? 'following-account'
-          : 'collection-video'
-      throw new Error(`A ${activeTask} task is active. Complete or stop it before starting another task.`)
-    }
-    this.owner = owner
-  }
-
-  release(owner: DouyinMutationOwner) {
-    if (this.owner === owner) this.owner = undefined
-  }
-
-  currentOwner() {
-    return this.owner
-  }
-}
+export {
+  PlatformMutationCoordinator as DouyinMutationCoordinator,
+  type PlatformMutationOwner as DouyinMutationOwner,
+} from '../../shared/platforms/mutation-coordinator.js'

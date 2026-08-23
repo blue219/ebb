@@ -5,12 +5,20 @@ import type {
   TaskCounts,
   TaskMode,
   TaskState,
-} from '../../../shared/platforms/douyin/contracts.js'
-import type { DouyinClient } from './client.js'
-import { DouyinMutationCoordinator } from './mutation-coordinator.js'
-import { FOLLOWING_PAGE_SIZE, FOLLOWING_PREFETCH_THRESHOLD } from './policy.js'
+} from '../../../shared/platforms/contracts.js'
+import {
+  DOUYIN_RUNTIME_CONFIG,
+  type PlatformClient,
+  type PlatformRuntimeConfig,
+} from './client.js'
+import { PlatformMutationCoordinator } from './mutation-coordinator.js'
+import {
+  createAutomaticRemovalPlan,
+  hasReachedAutomaticTarget,
+  remainingAutomaticTarget,
+} from '../removal-policy.js'
 
-export interface DouyinAccountContext {
+export interface PlatformAccountContext {
   getSnapshot: () => AccountSnapshot
   requireSignedInUserId: () => Promise<string>
   decrementFollowingCount: () => void
@@ -21,7 +29,7 @@ type AutomaticMode = Exclude<TaskMode, 'selected'>
 
 const sleep = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds))
 
-export class DouyinFollowingTaskService {
+export class PlatformFollowingTaskService {
   private state: TaskState = 'idle'
   private accounts: FollowingAccount[] = []
   private currentAccountId?: string
@@ -39,25 +47,36 @@ export class DouyinFollowingTaskService {
   private automaticPrefetch?: Promise<void>
   private automaticPrefetchGeneration = 0
   private taskCompleted = 0
-  private taskTotal = 0
-  private readonly client: DouyinClient
-  private readonly accountContext: DouyinAccountContext
-  private readonly mutationCoordinator: DouyinMutationCoordinator
+  private taskTotal: number | null = 0
+  private readonly client: PlatformClient
+  private readonly accountContext: PlatformAccountContext
+  private readonly mutationCoordinator: PlatformMutationCoordinator
   private readonly publish: StatusPublisher
   private readonly wait: (milliseconds: number) => Promise<void>
+  private readonly runtime: PlatformRuntimeConfig
 
   constructor(
-    client: DouyinClient,
-    accountContext: DouyinAccountContext,
-    mutationCoordinator: DouyinMutationCoordinator,
+    client: PlatformClient,
+    accountContext: PlatformAccountContext,
+    mutationCoordinator: PlatformMutationCoordinator,
     publish: StatusPublisher,
     wait: (milliseconds: number) => Promise<void> = sleep,
+    runtime: PlatformRuntimeConfig = DOUYIN_RUNTIME_CONFIG,
   ) {
     this.client = client
     this.accountContext = accountContext
     this.mutationCoordinator = mutationCoordinator
     this.publish = publish
     this.wait = wait
+    this.runtime = runtime
+  }
+
+  private get pageSize() {
+    return this.runtime.followingPageSize
+  }
+
+  private get owner() {
+    return `${this.runtime.id}:following` as const
   }
 
   getSnapshot() {
@@ -73,7 +92,7 @@ export class DouyinFollowingTaskService {
     this.hasMore = false
     this.isRefreshingCompletedList = false
     this.completionRefreshError = undefined
-    this.message = `Loading the first ${FOLLOWING_PAGE_SIZE} following accounts.`
+    this.message = `Loading the first ${this.pageSize} following accounts.`
     this.publishSnapshot()
 
     try {
@@ -99,7 +118,7 @@ export class DouyinFollowingTaskService {
     const previousState = this.state
     try {
       await this.accountContext.requireSignedInUserId()
-      if (!this.appendReplacementAccounts(FOLLOWING_PAGE_SIZE)) await this.loadNextPage()
+      if (!this.appendReplacementAccounts(this.pageSize)) await this.loadNextPage()
       this.message = `Loaded ${this.accounts.length} following accounts.${this.hasMore ? ' Scroll down to load more.' : ''}`
     } catch (error) {
       if (previousState === 'ready') this.state = 'paused'
@@ -127,7 +146,7 @@ export class DouyinFollowingTaskService {
     if (selectedIds.some((id) => !knownIds.has(id))) {
       throw new Error('The selection is no longer available. Scan again.')
     }
-    this.mutationCoordinator.acquire('following')
+    this.mutationCoordinator.acquire(this.owner)
     this.taskMode = 'selected'
     this.taskIds = selected
     this.taskProcessedIds = new Set()
@@ -137,7 +156,7 @@ export class DouyinFollowingTaskService {
       if (selected.has(item.id) && item.status !== 'completed') item.status = 'pending'
     }
     this.state = 'running'
-    this.message = 'Unfollowing selected accounts through the Douyin web API.'
+    this.message = `Unfollowing selected accounts through the ${this.runtime.displayName} web API.`
     this.publishSnapshot(selected)
     void this.processSelected(selected)
   }
@@ -146,20 +165,16 @@ export class DouyinFollowingTaskService {
     if (this.isRunning) return
     await this.accountContext.requireSignedInUserId()
     const pendingCount = this.accounts.filter((item) => item.status !== 'completed').length
-    const available = Math.max(0, this.accountContext.getSnapshot().followingCount ?? pendingCount)
-    let mode: AutomaticMode
-    let total: number
-    if (limit === undefined) {
-      mode = 'all'
-      total = available
-    } else {
-      if (!Number.isSafeInteger(limit) || limit <= 0) throw new Error('The unfollow limit must be a positive integer.')
-      if (limit > available) throw new Error(`The unfollow limit cannot exceed the account's ${available} following accounts.`)
-      mode = 'limited'
-      total = limit
-    }
+    const plan = createAutomaticRemovalPlan(
+      limit,
+      this.accountContext.getSnapshot().followingCount,
+      pendingCount,
+      'following accounts',
+    )
+    const mode: AutomaticMode = plan.mode
+    const total = plan.total
 
-    this.mutationCoordinator.acquire('following')
+    this.mutationCoordinator.acquire(this.owner)
     this.taskMode = mode
     this.taskIds = new Set()
     this.replacementAccounts = []
@@ -188,7 +203,7 @@ export class DouyinFollowingTaskService {
 
   resume(_selectedIds: string[]) {
     if (this.state !== 'paused' || !this.taskMode) return
-    this.mutationCoordinator.acquire('following')
+    this.mutationCoordinator.acquire(this.owner)
     if (this.taskMode === 'selected') {
       const knownIds = new Set(this.accounts.map((item) => item.id))
       if (!this.taskIds.size || [...this.taskIds].some((id) => !knownIds.has(id))) {
@@ -224,32 +239,32 @@ export class DouyinFollowingTaskService {
       ? 'Task stopped. Unprocessed accounts remain selected.'
       : 'Automatic unfollow stopped. Following accounts remain.'
     this.publishSnapshot(this.taskMode === 'selected' ? this.taskIds : undefined)
-    if (!this.isRunning) this.mutationCoordinator.release('following')
+    if (!this.isRunning) this.mutationCoordinator.release(this.owner)
   }
 
   resetForSignOut() {
     this.stop()
-    this.mutationCoordinator.release('following')
+    this.mutationCoordinator.release(this.owner)
     this.state = 'idle'
     this.accounts = []
     this.nextCursor = '0'
     this.hasMore = false
     this.isRefreshingCompletedList = false
     this.resetTask()
-    this.message = 'Signed out from Douyin on this device.'
+    this.message = `Signed out from ${this.runtime.displayName} on this device.`
     this.publishSnapshot()
   }
 
   handleWorkspaceCrash() {
     this.state = 'stopped'
     this.currentAccountId = undefined
-    this.message = 'The Douyin workspace stopped unexpectedly.'
-    this.mutationCoordinator.release('following')
+    this.message = `The ${this.runtime.displayName} workspace stopped unexpectedly.`
+    this.mutationCoordinator.release(this.owner)
     this.publishSnapshot(this.taskMode === 'selected' ? this.taskIds : undefined)
   }
 
   dispose() {
-    this.mutationCoordinator.release('following')
+    this.mutationCoordinator.release(this.owner)
   }
 
   private async processSelected(selectedIds: Set<string>) {
@@ -287,7 +302,7 @@ export class DouyinFollowingTaskService {
       if (this.state === 'running') {
         this.state = 'completed'
         this.message = 'The selected following accounts have been processed.'
-        this.mutationCoordinator.release('following')
+        this.mutationCoordinator.release(this.owner)
         this.publishSnapshot(selectedIds)
       }
     } catch (error) {
@@ -296,7 +311,7 @@ export class DouyinFollowingTaskService {
       this.publishSnapshot(selectedIds)
     } finally {
       this.isRunning = false
-      if (this.state === 'stopped') this.mutationCoordinator.release('following')
+      if (this.state === 'stopped') this.mutationCoordinator.release(this.owner)
     }
   }
 
@@ -333,7 +348,9 @@ export class DouyinFollowingTaskService {
             item.status = 'completed'
             this.taskProcessedIds.add(item.id)
             this.taskCompleted += 1
-            if (this.taskMode === 'all') this.taskTotal = Math.max(this.taskTotal, this.taskCompleted)
+            if (this.taskMode === 'all' && this.taskTotal !== null) {
+              this.taskTotal = Math.max(this.taskTotal, this.taskCompleted)
+            }
             this.accountContext.decrementFollowingCount()
           } catch (error) {
             item.status = 'failed'
@@ -358,17 +375,19 @@ export class DouyinFollowingTaskService {
       this.publishSnapshot()
     } finally {
       this.isRunning = false
-      if (this.state === 'stopped') this.mutationCoordinator.release('following')
+      if (this.state === 'stopped') this.mutationCoordinator.release(this.owner)
     }
   }
 
   private reachedAutomaticTarget() {
-    return this.taskMode === 'limited' && this.taskCompleted >= this.taskTotal
+    return this.taskMode !== undefined
+      && this.taskMode !== 'selected'
+      && hasReachedAutomaticTarget(this.taskMode, this.taskCompleted, this.taskTotal)
   }
 
   private remainingAutomaticTarget() {
-    return this.taskMode === 'limited'
-      ? Math.max(0, this.taskTotal - this.taskCompleted)
+    return this.taskMode && this.taskMode !== 'selected'
+      ? remainingAutomaticTarget(this.taskMode, this.taskCompleted, this.taskTotal)
       : Number.POSITIVE_INFINITY
   }
 
@@ -405,7 +424,7 @@ export class DouyinFollowingTaskService {
       this.publishSnapshot()
       return
     }
-    throw new Error('Douyin still reports following accounts but did not return a new batch. Continue to retry.')
+    throw new Error(`${this.runtime.displayName} still reports following accounts but did not return a new batch. Continue to retry.`)
   }
 
   private requestAutomaticPrefetch() {
@@ -418,7 +437,7 @@ export class DouyinFollowingTaskService {
     ) return
     const pendingCount = this.accounts.filter((item) => item.status !== 'completed').length
     const remaining = this.remainingAutomaticTarget()
-    if (pendingCount > FOLLOWING_PREFETCH_THRESHOLD || remaining <= pendingCount) return
+    if (pendingCount > this.runtime.followingPrefetchThreshold || remaining <= pendingCount) return
     const generation = this.automaticPrefetchGeneration
     const prefetch = this.prefetchAutomaticPage(generation).catch(() => {
       // The foreground loader retries if the active queue drains before the next page arrives.
@@ -451,13 +470,13 @@ export class DouyinFollowingTaskService {
 
   private appendAutomaticReplacementAccounts() {
     const pendingCount = this.accounts.filter((item) => item.status !== 'completed').length
-    const desiredCount = Math.min(FOLLOWING_PAGE_SIZE, this.remainingAutomaticTarget())
+    const desiredCount = Math.min(this.pageSize, this.remainingAutomaticTarget())
     return this.appendReplacementAccounts(Math.max(0, desiredCount - pendingCount))
   }
 
   private capAutomaticPendingRows() {
     if (!this.taskMode || this.taskMode === 'selected') return
-    const desiredCount = Math.min(FOLLOWING_PAGE_SIZE, this.remainingAutomaticTarget())
+    const desiredCount = Math.min(this.pageSize, this.remainingAutomaticTarget())
     let keptPending = 0
     const retained: FollowingAccount[] = []
     const overflow: FollowingAccount[] = []
@@ -478,15 +497,15 @@ export class DouyinFollowingTaskService {
     this.state = 'completed'
     this.currentAccountId = undefined
     if (mode === 'limited') {
-      if (exhausted && this.taskCompleted < this.taskTotal) this.taskTotal = this.taskCompleted
+      if (exhausted && this.taskTotal !== null && this.taskCompleted < this.taskTotal) this.taskTotal = this.taskCompleted
       this.message = `Unfollowed ${this.taskCompleted} accounts.`
     } else {
       this.hasMore = false
-      this.taskTotal = this.taskCompleted
+      if (this.taskTotal !== null) this.taskTotal = this.taskCompleted
       this.message = 'All following accounts have been unfollowed.'
     }
     this.accounts = []
-    this.mutationCoordinator.release('following')
+    this.mutationCoordinator.release(this.owner)
     this.publishSnapshot()
     await this.waitForAutomaticPrefetch()
     await this.refreshCompletedAutomaticList()
@@ -501,13 +520,13 @@ export class DouyinFollowingTaskService {
     this.publishSnapshot()
     try {
       const mode = this.taskMode
-      if (mode === 'limited') this.appendReplacementAccounts(FOLLOWING_PAGE_SIZE)
-      if (mode === 'all' || this.accounts.length < FOLLOWING_PAGE_SIZE) {
+      if (mode === 'limited') this.appendReplacementAccounts(this.pageSize)
+      if (mode === 'all' || this.accounts.length < this.pageSize) {
         const page = await this.loadFirstPage()
         this.hasMore = page.hasMore
         this.nextCursor = page.nextCursor ?? '0'
         this.bufferReplacementAccounts(page.accounts)
-        this.appendReplacementAccounts(FOLLOWING_PAGE_SIZE - this.accounts.length)
+        this.appendReplacementAccounts(this.pageSize - this.accounts.length)
       }
       this.message = mode === 'all'
         ? 'All following accounts have been unfollowed.'
@@ -565,7 +584,7 @@ export class DouyinFollowingTaskService {
     try {
       const id = await this.accountContext.requireSignedInUserId()
       const cursor = this.nextCursor
-      const page = await this.client.loadFollowing(id, cursor, FOLLOWING_PAGE_SIZE)
+      const page = await this.client.loadFollowing(id, cursor, this.pageSize)
       const found = new Map(this.accounts.map((item) => [item.id, item]))
       for (const item of page.accounts) found.set(item.id, item)
       this.accounts = [...found.values()]
@@ -578,7 +597,7 @@ export class DouyinFollowingTaskService {
 
   private async loadFirstPage() {
     const id = await this.accountContext.requireSignedInUserId()
-    return this.client.loadFollowing(id, '0', FOLLOWING_PAGE_SIZE)
+    return this.client.loadFollowing(id, '0', this.pageSize)
   }
 
   private resetTask() {

@@ -2,27 +2,27 @@ export type AutomaticRemovalMode = 'all' | 'limited'
 
 export interface AutomaticRemovalPlan {
   mode: AutomaticRemovalMode
-  total: number
+  total: number | null
 }
 
 export function createAutomaticRemovalPlan(
   limit: number | undefined,
   accountItemCount: number | undefined,
-  loadedPending: number,
+  _loadedPending: number,
   itemLabel = 'likes',
 ): AutomaticRemovalPlan {
-  // The signed-in account total is authoritative; loaded rows are only a fallback when it is unavailable.
-  const availableItems = Math.max(0, accountItemCount ?? loadedPending)
-  if (limit === undefined) return { mode: 'all', total: availableItems }
+  if (limit === undefined) return { mode: 'all', total: accountItemCount === undefined ? null : Math.max(0, accountItemCount) }
   if (!Number.isSafeInteger(limit) || limit <= 0) throw new Error('The removal limit must be a positive integer.')
-  if (limit > availableItems) throw new Error(`The removal limit cannot exceed the account's ${availableItems} ${itemLabel}.`)
+  if (accountItemCount !== undefined && limit > Math.max(0, accountItemCount)) {
+    throw new Error(`The removal limit cannot exceed the account's ${Math.max(0, accountItemCount)} ${itemLabel}.`)
+  }
   return { mode: 'limited', total: limit }
 }
 
-export function hasReachedAutomaticTarget(mode: AutomaticRemovalMode, completed: number, total: number) {
-  return mode === 'limited' && completed >= total
+export function hasReachedAutomaticTarget(mode: AutomaticRemovalMode, completed: number, total: number | null) {
+  return mode === 'limited' && total !== null && completed >= total
 }
 
-export function remainingAutomaticTarget(mode: AutomaticRemovalMode, completed: number, total: number) {
-  return mode === 'limited' ? Math.max(0, total - completed) : Number.POSITIVE_INFINITY
+export function remainingAutomaticTarget(mode: AutomaticRemovalMode, completed: number, total: number | null) {
+  return mode === 'limited' && total !== null ? Math.max(0, total - completed) : Number.POSITIVE_INFINITY
 }

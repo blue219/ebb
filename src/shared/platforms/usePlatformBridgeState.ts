@@ -5,7 +5,8 @@ import type {
   FollowingTaskSnapshot,
   LoginSnapshot,
   TaskSnapshot,
-} from '../../../shared/platforms/douyin/contracts'
+  PlatformBridge,
+} from '../../../shared/platforms/contracts'
 
 const initialTaskSnapshot: TaskSnapshot = {
   state: 'idle',
@@ -27,7 +28,7 @@ const initialFollowingTaskSnapshot: FollowingTaskSnapshot = {
   isRefreshingCompletedList: false,
 }
 
-export function useDouyinBridgeState(loginOpen: boolean) {
+export function usePlatformBridgeState(loginOpen: boolean, bridge: PlatformBridge, platformName = 'Douyin') {
   const [task, setTask] = useState(initialTaskSnapshot)
   const [followingTask, setFollowingTask] = useState(initialFollowingTaskSnapshot)
   const [collectionTask, setCollectionTask] = useState(initialTaskSnapshot)
@@ -37,41 +38,48 @@ export function useDouyinBridgeState(loginOpen: boolean) {
   useEffect(() => {
     let active = true
     const received = { account: false, collectionTask: false, followingTask: false, login: false, task: false }
-    const stopTask = window.ebb.douyin.onStatus((snapshot) => {
+    const stopTask = bridge.onStatus((snapshot) => {
       if (!active) return
       received.task = true
       setTask(snapshot)
     })
-    const stopAccount = window.ebb.douyin.onAccount((snapshot) => {
+    const stopAccount = bridge.onAccount((snapshot) => {
       if (!active) return
       received.account = true
       setAccount(snapshot)
     })
-    const stopLogin = window.ebb.douyin.onLogin((snapshot) => {
+    const stopLogin = bridge.onLogin((snapshot) => {
       if (!active) return
       received.login = true
       setLogin(snapshot)
     })
-    const stopFollowingTask = window.ebb.douyin.following.onStatus((snapshot) => {
+    const stopFollowingTask = bridge.following.onStatus((snapshot) => {
       if (!active) return
       received.followingTask = true
       setFollowingTask(snapshot)
     })
-    const stopCollectionTask = window.ebb.douyin.collection.onStatus((snapshot) => {
+    const stopCollectionTask = bridge.collection.onStatus((snapshot) => {
       if (!active) return
       received.collectionTask = true
       setCollectionTask(snapshot)
     })
 
-    void window.ebb.douyin.getState().then((state) => {
-      if (!active) return
-      // Events published after getState was invoked are newer than its returned snapshot.
-      if (!received.task) setTask(state.task)
-      if (!received.followingTask) setFollowingTask(state.followingTask)
-      if (!received.collectionTask) setCollectionTask(state.collectionTask)
-      if (!received.account) setAccount(state.account)
-      if (!received.login) setLogin(state.login)
-    })
+    void bridge.getState()
+      .then((state) => {
+        if (!active) return
+        // Events published after getState was invoked are newer than its returned snapshot.
+        if (!received.task) setTask(state.task)
+        if (!received.followingTask) setFollowingTask(state.followingTask)
+        if (!received.collectionTask) setCollectionTask(state.collectionTask)
+        if (!received.account) setAccount(state.account)
+        if (!received.login) setLogin(state.login)
+      })
+      .catch((error: unknown) => {
+        if (!active) return
+        const message = error instanceof Error ? error.message : `Unable to initialize ${platformName}.`
+        setAccount({ state: 'signedOut', message })
+        setLogin({ state: 'error', message })
+      })
 
     return () => {
       active = false
@@ -81,22 +89,22 @@ export function useDouyinBridgeState(loginOpen: boolean) {
       stopFollowingTask()
       stopCollectionTask()
     }
-  }, [])
+  }, [bridge, platformName])
 
   useEffect(() => {
     if (!loginOpen) return
 
-    void window.ebb.douyin.showLogin().catch((error) => {
+    void bridge.showLogin().catch((error) => {
       setLogin({
         state: 'error',
-        message: error instanceof Error ? error.message : 'Unable to load the Douyin QR code.',
+        message: error instanceof Error ? error.message : `Unable to load the ${platformName} QR code.`,
       })
     })
 
     return () => {
-      void window.ebb.douyin.hideLogin()
+      void bridge.hideLogin()
     }
-  }, [loginOpen])
+  }, [bridge, loginOpen, platformName])
 
   return { account, collectionTask, followingTask, login, setCollectionTask, setTask, task }
 }

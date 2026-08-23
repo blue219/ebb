@@ -215,10 +215,10 @@ export class ElectronDouyinClient implements DouyinClient {
           credentials: 'include',
           headers: {
             Accept: 'application/json, text/plain, */*',
-            ...(requestBody ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}),
+            ...${JSON.stringify(requestBody ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {})},
           },
           method: ${JSON.stringify(method)},
-          ...(requestBody ? { body: ${JSON.stringify(requestBody)} } : {}),
+          ...${JSON.stringify(requestBody ? { body: requestBody } : {})},
         })
         return { ok: response.ok, status: response.status, text: await response.text() }
       })()

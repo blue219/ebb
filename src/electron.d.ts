@@ -1,10 +1,11 @@
-import type { DouyinBridge } from '../shared/platforms/douyin/contracts'
+import type { PlatformBridge } from '../shared/platforms/contracts'
 
 declare global {
   interface Window {
     ebb: {
       platform: string
-      douyin: DouyinBridge
+      douyin: PlatformBridge
+      tiktok: PlatformBridge
     }
   }
 }

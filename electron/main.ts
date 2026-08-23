@@ -3,11 +3,15 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { createDouyinPlatformModule } from './platforms/douyin/module.js'
+import { createTikTokPlatformModule } from './platforms/tiktok/module.js'
+import { PlatformMutationCoordinator } from './shared/platforms/mutation-coordinator.js'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 let mainWindow: BrowserWindow | undefined
 
-const douyin = createDouyinPlatformModule(() => mainWindow)
+const mutationCoordinator = new PlatformMutationCoordinator()
+const douyin = createDouyinPlatformModule(() => mainWindow, mutationCoordinator)
+const tiktok = createTikTokPlatformModule(() => mainWindow, mutationCoordinator)
 
 const createWindow = () => {
   mainWindow = new BrowserWindow({
@@ -28,8 +32,6 @@ const createWindow = () => {
   } else {
     void mainWindow.loadFile(join(currentDirectory, '../dist/index.html'))
   }
-
-  void douyin.initialize(mainWindow)
 }
 
 app.whenReady().then(() => {
@@ -44,4 +46,7 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-app.on('before-quit', () => douyin.dispose())
+app.on('before-quit', () => {
+  douyin.dispose()
+  tiktok.dispose()
+})

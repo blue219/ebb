@@ -1,0 +1,59 @@
+{
+  "currentUser": {
+    "statusCode": 0,
+    "userInfo": {
+      "user": {
+        "secUid": "sanitized-user-1",
+        "nickname": "Sanitized account",
+        "uniqueId": "sanitized-account"
+      },
+      "stats": {
+        "followingCount": 12,
+        "heartCount": 999
+      }
+    }
+  },
+  "likedVideos": {
+    "statusCode": 0,
+    "itemList": [
+      {
+        "id": "sanitized-video-1",
+        "desc": "Sanitized liked video"
+      }
+    ],
+    "cursor": "30",
+    "hasMore": true
+  },
+  "favoriteVideos": {
+    "statusCode": 0,
+    "itemList": [
+      {
+        "id": "sanitized-favorite-1",
+        "desc": "Sanitized favorite video"
+      }
+    ],
+    "cursor": "30",
+    "hasMore": false
+  },
+  "following": {
+    "statusCode": 0,
+    "userList": [
+      {
+        "user": {
+          "secUid": "sanitized-following-1",
+          "nickname": "Sanitized creator",
+          "uniqueId": "sanitized-creator"
+        }
+      }
+    ],
+    "cursor": "20",
+    "hasMore": false
+  },
+  "mutationSuccess": {
+    "statusCode": 0
+  },
+  "mutationRejected": {
+    "statusCode": 10201,
+    "statusMsg": "verification required"
+  }
+}
