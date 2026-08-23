@@ -92,6 +92,7 @@ test('runs an offline manual unfollow through the production preload bridge', as
   try {
     await expectIsolatedWindow(electronApp, window)
     await window.getByRole('button', { name: 'Following accounts' }).click()
+    await expect(window.getByRole('button', { name: 'Following accounts', exact: true })).toHaveAttribute('aria-pressed', 'true')
     await expect(window.getByText('Offline first account')).toBeVisible()
     await window.getByRole('checkbox', { name: 'Offline first account' }).click()
     await window.getByRole('button', { name: 'Unfollow 1 accounts' }).click()

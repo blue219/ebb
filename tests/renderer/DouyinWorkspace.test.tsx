@@ -109,6 +109,7 @@ describe('Douyin workspace user flows', () => {
     expect(harness.bridge.following.scan).toHaveBeenCalledOnce()
     harness.emitFollowingStatus(readyFollowingTask())
     expect(await screen.findByText('First account')).toBeInTheDocument()
+    expect(document.querySelectorAll('.following-account-card')).toHaveLength(2)
     expect(screen.getAllByText('@first-id').length).toBeGreaterThan(0)
     expect(screen.getByText('Mutual')).toBeInTheDocument()
 

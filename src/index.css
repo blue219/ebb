@@ -185,6 +185,38 @@
     transform: rotate(45deg);
   }
 
+  .following-account-grid {
+    @apply grid grid-cols-2 gap-2 p-3 sm:grid-cols-3 sm:gap-2.5 sm:p-4 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6;
+  }
+
+  .following-account-card {
+    @apply relative block aspect-square min-w-0 overflow-hidden rounded-2xl bg-zinc-100 shadow-[0_1px_2px_rgba(15,23,42,0.08)] transition-[transform,box-shadow,outline] duration-200 hover:-translate-y-0.5 hover:shadow-[0_12px_26px_rgba(15,23,42,0.18)];
+  }
+
+  .following-account-card.is-selected {
+    @apply outline-2 outline-offset-2 outline-blue-500;
+  }
+
+  .following-relation {
+    @apply absolute top-2 right-2 rounded-full border border-white/20 bg-zinc-950/38 px-2 py-1 text-[10px] font-medium text-white/88 shadow-sm backdrop-blur-md;
+  }
+
+  .following-relation.is-mutual {
+    @apply border-blue-200/50 bg-blue-600/72 text-white;
+  }
+
+  .following-account-details {
+    @apply absolute right-3 bottom-3 left-3 flex min-w-0 flex-col gap-0.5 text-white;
+  }
+
+  .following-account-status {
+    @apply absolute right-2 bottom-2 grid size-7 place-items-center rounded-full bg-white/88 text-zinc-700 shadow-sm;
+  }
+
+  .following-account-status.is-failed {
+    @apply bg-red-600 text-white;
+  }
+
   .floating-action-bar {
     @apply absolute bottom-3 left-1/2 z-20 flex w-fit max-w-[calc(100%-1.5rem)] -translate-x-1/2 flex-wrap items-center justify-center gap-2.5 rounded-[20px] border border-white/90 bg-white/88 p-3.5 shadow-[0_18px_40px_rgba(15,23,42,0.16)] backdrop-blur-2xl sm:bottom-5 sm:max-w-[calc(100%-2.5rem)] sm:flex-nowrap;
   }

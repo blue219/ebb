@@ -82,7 +82,12 @@ function DouyinWorkspace() {
   const isSignedIn = account.state === 'signedIn'
   const likesDisplay = account.likesCount?.toLocaleString()
     ?? (snapshot.state === 'scanning' ? '…' : `${snapshot.counts.loaded}${snapshot.hasMore ? '+' : ''}`)
-
+  const isWorkspaceRefreshing = activeWorkspace === 'likes'
+    ? snapshot.state === 'scanning'
+    : followingSnapshot.state === 'scanning'
+  const isWorkspaceRefreshDisabled = activeWorkspace === 'likes'
+    ? !isSignedIn || busy || snapshot.state === 'running' || snapshot.state === 'paused' || snapshot.state === 'scanning' || snapshot.isLoadingMore || snapshot.isRefreshingCompletedList
+    : !isSignedIn || busy || ['running', 'paused', 'scanning'].includes(followingSnapshot.state) || followingSnapshot.isLoadingMore || followingSnapshot.isRefreshingCompletedList
   const run = useCallback(async (action: () => Promise<void>) => {
     setBusy(true)
     try {
@@ -340,22 +345,17 @@ function DouyinWorkspace() {
         </aside>
 
         <section className="workspace-content">
-          <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-zinc-200/70 px-4 py-3 sm:px-6 sm:py-4">
-            <div className="flex items-baseline gap-3">
-              <h2 className="text-xl font-semibold tracking-[-0.045em]">{activeWorkspace === 'likes' ? t.likedVideosTab : t.followingAccountsTab}</h2>
-              <span className="text-sm text-zinc-400">{activeWorkspace === 'likes' ? `${likesDisplay} ${t.likes}` : account.followingCount?.toLocaleString()}</span>
-            </div>
-            <nav className="flex rounded-xl border border-zinc-200/80 bg-white/60 p-1 text-xs shadow-sm" aria-label="Douyin workspace" role="group">
-              <button type="button" aria-pressed={activeWorkspace === 'likes'} className={`rounded-lg px-3 py-1.5 transition-colors ${activeWorkspace === 'likes' ? 'bg-zinc-950 text-white shadow-sm' : 'text-zinc-600 hover:bg-white/80'}`} disabled={isWorkspaceSwitchLocked} onClick={() => setActiveWorkspace('likes')}>{t.likedVideosTab}</button>
-              <button type="button" aria-pressed={activeWorkspace === 'following'} className={`rounded-lg px-3 py-1.5 transition-colors ${activeWorkspace === 'following' ? 'bg-zinc-950 text-white shadow-sm' : 'text-zinc-600 hover:bg-white/80'}`} disabled={isWorkspaceSwitchLocked} onClick={() => setActiveWorkspace('following')}>{t.followingAccountsTab}</button>
+          <header className="relative flex h-[72px] shrink-0 items-center justify-end border-b border-zinc-200/70 px-4 sm:px-6">
+            <nav className="absolute left-1/2 flex -translate-x-1/2 rounded-2xl border border-zinc-200/80 bg-white/60 p-1.5 text-sm shadow-sm" aria-label="Douyin workspace" role="group">
+              <button type="button" aria-pressed={activeWorkspace === 'likes'} className={`rounded-xl px-5 py-2.5 font-medium transition-colors ${activeWorkspace === 'likes' ? 'bg-zinc-950 text-white shadow-sm' : 'text-zinc-600 hover:bg-white/80'}`} disabled={isWorkspaceSwitchLocked} onClick={() => setActiveWorkspace('likes')}>{t.likedVideosTab}</button>
+              <button type="button" aria-pressed={activeWorkspace === 'following'} className={`rounded-xl px-5 py-2.5 font-medium transition-colors ${activeWorkspace === 'following' ? 'bg-zinc-950 text-white shadow-sm' : 'text-zinc-600 hover:bg-white/80'}`} disabled={isWorkspaceSwitchLocked} onClick={() => setActiveWorkspace('following')}>{t.followingAccountsTab}</button>
             </nav>
+            <Button variant="outline" aria-label={activeWorkspace === 'likes' ? t.refreshList : t.refreshFollowingList} title={activeWorkspace === 'likes' ? t.refreshList : t.refreshFollowingList} className="size-9 rounded-xl border-zinc-200 bg-white/65 p-0 text-zinc-700 shadow-none" disabled={isWorkspaceRefreshDisabled} onClick={activeWorkspace === 'likes' ? refreshVideos : () => void window.ebb.douyin.following.scan()}><Icon name="refresh" className={`size-5 ${isWorkspaceRefreshing ? 'animate-spin' : ''}`} /></Button>
           </header>
 
           {activeWorkspace === 'likes' ? <section className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-            <div className="flex shrink-0 items-center justify-between gap-3 px-4 py-3 sm:px-6">
-              <div className="min-w-0"><p className="truncate text-sm font-medium text-zinc-800">{t.taskStates[snapshot.state]}</p><p className="mt-0.5 truncate text-xs text-zinc-500">{snapshot.message ?? t.privacy}</p></div>
-              <Button variant="outline" aria-label={t.refreshList} title={t.refreshList} className="size-9 rounded-xl border-zinc-200 bg-white/65 p-0 text-zinc-700 shadow-none" disabled={!isSignedIn || busy || snapshot.state === 'running' || snapshot.state === 'paused' || snapshot.state === 'scanning' || snapshot.isLoadingMore || snapshot.isRefreshingCompletedList} onClick={refreshVideos}><Icon name="refresh" className={`size-5 ${snapshot.state === 'scanning' ? 'animate-spin' : ''}`} /></Button>
-            </div>
+            <span className="sr-only" role="status">{t.taskStates[snapshot.state]}</span>
+            <span className="sr-only" role="status">{snapshot.message ?? t.privacy}</span>
 
             {visibleVideos.length ? <div ref={videoScrollRef} data-testid="video-collection" className="table-scroll min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto pb-28" onScroll={handleVideoScroll} onWheel={handleVideoWheel}>
               <div className="video-cover-grid">{visibleVideos.map((video) => <VideoRow key={video.id} id={video.id} title={video.title} thumbnail={video.thumbnail} status={video.status} selected={effectiveSelectedIds.has(video.id)} taskLocked={isTaskLocked} onToggle={toggleVideo} onDismiss={dismissCompletedVideo} />)}</div>
