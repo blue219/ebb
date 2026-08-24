@@ -2,7 +2,7 @@
 
 Ebb is a development-stage Electron app for reviewing and bulk-removing liked videos, collected videos, and followed accounts from Douyin and TikTok.
 
-> Removing a like changes the signed-in account and cannot be undone by Ebb. Start with a small manual selection and verify the result in Douyin before using a larger scope.
+> Removing a like changes the signed-in account and cannot be undone by Ebb. Start with a small manual selection and verify the result on the selected platform before using a larger scope.
 
 > Unfollowing an account also changes the signed-in account and cannot be undone by Ebb. An **All** unfollow task includes mutual follows and accounts followed elsewhere while the task is running.
 
@@ -18,7 +18,7 @@ Ebb is a development-stage Electron app for reviewing and bulk-removing liked vi
 - Pause, continue, or stop a removal task between API requests.
 - Use the interface in English or Chinese.
 
-TikTok uses an independent local browser session and the same three batch scopes as Douyin. Liked videos and Favorite Videos pass the current read-only live gate, while Following remains release-blocked because TikTok returns an empty response for the private following-list request. Ebb reports that contract error without locking workspace navigation and does not fall back to DOM automation or signature generation. See [TikTok private web contract](docs/tiktok-web-contract.md). Distributable installers are not implemented yet. `npm run build` produces application bundles, not an installer.
+TikTok uses an independent local browser session and the same three batch scopes as Douyin. Liked videos, Favorite Videos, and the signed-in account's Following list pass the current read-only live gate. TikTok rejects unsigned mutation requests, so the adapter briefly opens TikTok's sandboxed first-party page, invokes the page's own narrowly scoped controls, verifies the resulting state, and returns focus to Ebb. Ebb does not export credentials or generate request signatures. One-account unfollow verification and Following pagination beyond 30 rows remain release gates. See [TikTok private web contract](docs/tiktok-web-contract.md). Distributable installers are not implemented yet. `npm run build` produces application bundles, not an installer.
 
 ## Development baseline
 
@@ -33,7 +33,7 @@ npm ci
 npm run dev
 ```
 
-`npm run dev` starts Vite and launches Electron with hot reload. Ebb uses the real signed-in Douyin account; there is no mocked API mode.
+`npm run dev` starts Vite and launches Electron with hot reload. Ebb uses the real signed-in platform accounts; there is no mocked API mode.
 
 ## Commands
 
@@ -58,15 +58,17 @@ npm run dev
 4. Review **Clear N likes**, confirm the task, and use the progress control to pause or continue. **Stop** ends the current task without processing the remaining items.
 5. After a completed task, select the completed progress control or **Reset** to return to the default **All** scope.
 
-The following-accounts workspace uses the same three batch scopes. A running or paused task locks the workspace switcher, so unlike and unfollow requests cannot run concurrently. **All unfollows** repeatedly scan the first page until Douyin returns no following accounts; do not follow new accounts on another device while this task runs unless they should also be removed.
+The following-accounts workspace uses the same three batch scopes. A running or paused task locks the workspace switcher, so unlike and unfollow requests cannot run concurrently. **All unfollows** repeatedly scan the first page until the selected platform returns no following accounts; do not follow new accounts on another device while this task runs unless they should also be removed.
 
-The collected-videos workspace uses the same three batch scopes. **All collections** repeatedly scan the first page until Douyin returns no collected videos, so collections added on another device while the task runs may also be removed. Ebb cancels a video's overall collection status; it does not select or alter a specific collection folder.
+The collected-videos workspace uses the same three batch scopes. **All collections** repeatedly scan the first page until the selected platform returns no collected videos, so collections added on another device while the task runs may also be removed. Ebb cancels a video's overall collection status; it does not select or alter a specific collection folder.
+
+TikTok list reads and account state remain inside its isolated local session. Following scans and TikTok mutations require an active first-party page, so a separate TikTok window appears briefly and Ebb regains focus when the operation finishes. Do not interact with that temporary page while a task is running. Ebb pauses when TikTok requests sign-in or verification, a required control is unavailable, or the requested state change cannot be confirmed.
 
 The modes have different boundaries:
 
 - **Custom** freezes the selected video IDs when the task starts.
 - A numeric limit freezes the target count when the task starts and prefetches up to 30 rows when the active queue falls to 10 rows. After completion, Ebb refreshes the table with remaining likes without changing the completed target.
-- **All** does not freeze a list of video IDs. It reloads from the first page after each batch and continues until Douyin returns no likes. Do not add new likes while an **All** task is running.
+- **All** does not freeze a list of video IDs. It reloads from the first page after each batch and continues until the selected platform returns no likes. Do not add new likes while an **All** task is running.
 
 Date-based scopes are intentionally unavailable because the current integration has not observed a stable timestamp for when the signed-in person liked each video. A video's publication time is not a substitute.
 

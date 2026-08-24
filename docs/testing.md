@@ -35,7 +35,7 @@ The automated layers cover:
 
 The Electron fixture uses `test-results/` for failure screenshots and traces. It uses a new temporary user-data directory for every test, does not create `persist:ebb-douyin` or `persist:ebb-tiktok`, and fails if the app attempts an external HTTP(S) request.
 
-Shared-platform tests additionally cover unknown totals, platform-namespaced bridges, independent account state, and the application-wide mutation lock. TikTok adapter tests use only sanitized response fixtures described in [tiktok-web-contract.md](tiktok-web-contract.md).
+Shared-platform tests additionally cover unknown totals, platform-namespaced bridges, independent account state, and the application-wide mutation lock. TikTok adapter tests use sanitized API responses and synthetic DOM fixtures described in [tiktok-web-contract.md](tiktok-web-contract.md).
 
 ## Real-account release check
 
@@ -78,7 +78,7 @@ If the read-only list contract lacks stable IDs or reliable pagination, or if th
 5. Unfollow exactly one manually selected account, refresh, and confirm it is absent.
 6. Sign out from TikTok and confirm the Douyin session remains unchanged.
 
-Stop immediately if any request requires a generated signature, DOM automation, verification bypass, or repeated retries. A failure in any of the three workflows blocks the complete TikTok milestone.
+During a TikTok Following scan or mutation, confirm that the temporary first-party window appears, Ebb regains focus afterward, and the requested page state changes before Ebb marks the item complete. Stop immediately if the workflow requires generated-signature code, verification bypass, broad page automation, or repeated retries. A failure in any of the three workflows blocks the complete TikTok milestone.
 
 ## Real-account collection-removal release check
 
@@ -97,5 +97,5 @@ If the read-only list contract lacks stable IDs or reliable pagination, or if th
 
 - For a Vitest failure, run the reported file directly with `npx vitest run <path>`.
 - For an Electron failure, inspect the retained trace or screenshot under `test-results/`, then rerun `npm run test:e2e`.
-- If the offline Electron test reports an external request, treat it as an isolation regression; the fixture must not be allowed to contact Douyin.
+- If the offline Electron test reports an external request, treat it as an isolation regression; the fixture must not be allowed to contact either platform.
 - If the manual check encounters verification or rate limiting, stop the task. Do not repeatedly retry the account; sign out and retry later with a refreshed QR code.

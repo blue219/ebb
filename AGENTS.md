@@ -1,6 +1,6 @@
 ## Repository description
 
-`Ebb` is a desktop app for bulk-removing liked videos. Douyin is implemented; TikTok is planned.
+`Ebb` is a desktop app for reviewing and bulk-removing liked videos, collected videos, and followed accounts. Douyin and TikTok are implemented; TikTok retains the live release gates documented in [docs/tiktok-web-contract.md](docs/tiktok-web-contract.md).
 
 ## Goal
 

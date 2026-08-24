@@ -10,8 +10,8 @@ React renderer
   -> platform-namespaced Electron IPC
   -> shared task modules in the main process
   -> Douyin or TikTok browser adapter
-  -> hidden-window-hosted, sandboxed WebContentsView
-  -> platform web pages and private web API
+  -> background-window-hosted, sandboxed WebContentsView
+  -> platform web pages and private web behavior
 ```
 
 - `src/main.tsx` mounts the React application.
@@ -19,8 +19,9 @@ React renderer
 - `electron/main.ts` owns the application window and platform-module lifecycle.
 - `electron/preload.ts` exposes the narrow `window.ebb` API.
 - Shared task modules own account checks and liked-video, collected-video, and following-account task behavior through an injected `PlatformClient` interface.
-- `ElectronDouyinClient` and `ElectronTikTokClient` are production adapters. Each owns an isolated persistent partition and a sandboxed `WebContentsView` hosted in a `show: false` window.
-- The hidden TikTok workspace is muted, background-throttled, and pauses page media playback while preserving its first-party browser context for account operations.
+- `ElectronDouyinClient` and `ElectronTikTokClient` are production adapters. Each owns an isolated persistent partition and a sandboxed `WebContentsView` in a separate window.
+- The Douyin workspace stays hidden. The TikTok workspace starts hidden but temporarily appears for Following scans and mutation controls because TikTok suppresses or rejects those operations in a hidden page.
+- The TikTok workspace is muted, background-throttled, pauses page media playback, and restores focus to Ebb after each foreground operation. All page-specific knowledge remains behind `PlatformClient`.
 - Platform modules initialize lazily when their renderer workspace is first opened.
 
 ## Directory ownership
@@ -51,7 +52,7 @@ docs/                             Architecture, domain, and validation documenta
 
 The main process is authoritative for each platform's account, login, liked-video, collected-video, following-account, and task snapshots. Each renderer bridge uses its own `douyin:*` or `tiktok:*` channel namespace.
 
-Renderer commands use `douyin:*` request channels. The preload bridge is the only renderer access to those channels; the renderer does not import Electron APIs.
+Renderer commands use platform-namespaced `douyin:*` or `tiktok:*` request channels. The preload bridge is the only renderer access to those channels; the renderer does not import Electron APIs.
 
 Removal modes map to the service as follows:
 
@@ -82,18 +83,18 @@ Changing the partition name or renderer key is a session migration and must be p
 - The preload bridge exposes typed operations rather than raw `ipcRenderer` access.
 - Each workspace denies new windows, restricts top-level navigation to its platform hosts, and blocks unsafe subframe protocols.
 - QR images must be bounded PNG, JPEG, or WebP data URLs before they reach the renderer.
-- Current-account probes use Electron's fetch bound to the matching persistent platform partition, so login-page navigation cannot strand authentication polling. List and mutation requests still execute inside the isolated workspace so each platform receives the expected browser context and session cookies.
+- Current-account probes use Electron's fetch bound to the matching persistent platform partition, so login-page navigation cannot strand authentication polling. List reads execute inside the isolated workspace when the platform requires browser context. TikTok Following scans and mutations use narrowly scoped controls on the first-party page and require an observable resulting state before the adapter reports success.
 
-The integration depends on a private external API and must treat every response as untrusted. Keep payload parsing defensive and pause mutation work on rejected responses.
+The integration depends on private external behavior and must treat every response and page state as untrusted. Keep payload parsing defensive and pause mutation work on rejected responses, missing controls, or unconfirmed state changes.
 
-Official developer OAuth does not provide the private consumer-account mutations used by these workflows. Ebb therefore does not mix OAuth tokens with its local browser sessions. TikTok's unverified private contract and release gate are documented in [tiktok-web-contract.md](tiktok-web-contract.md).
+Official developer OAuth does not provide the private consumer-account mutations used by these workflows. Ebb therefore does not mix OAuth tokens with its local browser sessions. TikTok's first-party page contract and remaining release gates are documented in [tiktok-web-contract.md](tiktok-web-contract.md).
 
 ## Test topology
 
 - Vitest Node tests exercise domain policy, response parsing, preload/IPC mapping, and liked-video/collected-video/following task services through an in-memory `DouyinClient` adapter.
 - Vitest jsdom tests exercise renderer behavior and the serializable login-surface detector through accessible user interactions.
 - Playwright launches a separate Electron test entry that loads the production renderer and preload with in-memory IPC handlers. It blocks external HTTP(S) requests and uses a temporary user-data directory, so it cannot reach the real account partition.
-- Live-account verification remains a manual release gate and is limited to one explicitly expendable like or one explicitly expendable following relationship per changed area.
+- Live-account verification remains a manual release gate and is limited to one explicitly expendable item per changed mutation area.
 
 ## Build outputs
 
