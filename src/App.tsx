@@ -1,13 +1,11 @@
 import { useState } from 'react'
 
 import PlatformWorkspace from '@/shared/platforms/PlatformWorkspace'
-import type { AppPage } from '@/components/AppNavigation'
-import SpaceXWorkspace from '@/spacex/SpaceXWorkspace'
+import type { PlatformId } from '../shared/platforms/contracts'
 
 function App() {
-  const [page, setPage] = useState<AppPage>('douyin')
-  if (page === 'spacex') return <SpaceXWorkspace onSelectPage={setPage} />
-  return <PlatformWorkspace key={page} platform={page} onSelectPlatform={setPage} onOpenSpaceX={() => setPage('spacex')} />
+  const [platform, setPlatform] = useState<PlatformId>('douyin')
+  return <PlatformWorkspace key={platform} platform={platform} onSelectPlatform={setPlatform} />
 }
 
 export default App

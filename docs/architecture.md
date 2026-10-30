@@ -15,7 +15,7 @@ React renderer
 ```
 
 - `src/main.tsx` mounts the React application.
-- `src/App.tsx` selects the active app page: Douyin, TikTok, or the independent SpaceX analysis workspace. SpaceX is not an account platform and does not implement `PlatformClient`.
+- `src/App.tsx` owns the platform switcher and selects the active workspace.
 - `electron/main.ts` owns the application window and platform-module lifecycle.
 - `electron/preload.ts` exposes the narrow `window.ebb` API.
 - Shared task modules own account checks and liked-video, collected-video, and following-account task behavior through an injected `PlatformClient` interface.
@@ -67,12 +67,6 @@ Selected removal keeps the current page and buffers replacement rows. Limited an
 Collection-removal tasks use the same three scope boundaries with video IDs and restart at the first page because removing a collection shifts subsequent results forward. Unfollow tasks use the same boundaries with following-account IDs. Platform adapters hide cursor and response differences. One application-wide mutation coordinator permits only one unlike, uncollect, or unfollow task across both platforms; a paused task retains ownership until it completes or stops.
 
 ## Persistence
-
-SpaceX analysis is owned by `src/spacex/`, with navigation shared through `src/components/AppNavigation.tsx`. Its renderer fetches the public SpaceX launch tiles and future timings concurrently without credentials and validates both before accepting a normalized completed-mission snapshot. It uses `missionStatus === "final"` and excludes entries with a matching non-null future timing. Table dates remain calendar dates without local time conversion. Sorting is stable, and search plus exact-value and inclusive date filters are applied together.
-
-The single `ebb:spacex:missions:v1` localStorage entry contains only normalized table rows, schema version, and `fetchedAt`. Cache validity is strictly less than 12 hours from that successful fetch; reads and page entry never write or renew it. A valid cache suppresses requests. Missing, corrupt, future-dated, or expired entries require a fetch; they are not used as offline fallbacks. Manual refresh bypasses the cache. Only fully validated successful responses replace it, and write failures leave the fetched result usable in memory. There is no background polling or history persistence.
-
-SpaceX exposes only `window.ebb.spacex.openMission(slug)` through preload, backed by `spacex:open-mission`. The main process accepts requests only from the main window's main frame, validates a bounded alphanumeric/hyphen/underscore slug, constructs a fixed `https://www.spacex.com/launches/` URL, and opens it through the system browser. It never accepts arbitrary external URLs. The SpaceX card shares the account workspaces' existing active/paused mutation navigation lock.
 
 - The Douyin browser session uses Electron partition `persist:ebb-douyin`. Cookies and site storage survive restarts.
 - The TikTok browser session uses Electron partition `persist:ebb-tiktok` and never shares storage with Douyin.

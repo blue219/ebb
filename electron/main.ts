@@ -1,11 +1,10 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { createDouyinPlatformModule } from './platforms/douyin/module.js'
 import { createTikTokPlatformModule } from './platforms/tiktok/module.js'
 import { PlatformMutationCoordinator } from './shared/platforms/mutation-coordinator.js'
-import { missionUrl, SPACEX_OPEN_MISSION } from '../shared/spacex.js'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 let mainWindow: BrowserWindow | undefined
@@ -36,12 +35,6 @@ const createWindow = () => {
 }
 
 app.whenReady().then(() => {
-  ipcMain.handle(SPACEX_OPEN_MISSION, async (event, slug: unknown) => {
-    if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) {
-      throw new Error('Untrusted SpaceX mission request.')
-    }
-    await shell.openExternal(missionUrl(slug))
-  })
   createWindow()
 
   app.on('activate', () => {

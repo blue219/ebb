@@ -20,14 +20,6 @@ Ebb is a development-stage Electron app for reviewing and bulk-removing liked vi
 
 TikTok uses an independent local browser session and the same three batch scopes as Douyin. Liked videos, Favorite Videos, and the signed-in account's Following list pass the current read-only live gate. TikTok rejects unsigned mutation requests, so the adapter briefly opens TikTok's sandboxed first-party page, invokes the page's own narrowly scoped controls, verifies the resulting state, and returns focus to Ebb. Ebb does not export credentials or generate request signatures. One-account unfollow verification and Following pagination beyond 30 rows remain release gates. See [TikTok private web contract](docs/tiktok-web-contract.md). Distributable installers are not implemented yet. `npm run build` produces application bundles, not an installer.
 
-## SpaceX mission analysis
-
-Select the **SpaceX** sidebar card to browse completed launches without signing in. The table keeps the official mission, vehicle, launch site, return site, and launch date columns, plus a **Details** action that opens the corresponding SpaceX website page in the system browser. Click any data column header to toggle sorting; the default is newest launch date first. Search mission names or combine vehicle, launch site, return site, and inclusive date filters. **Reset** clears filters and restores the default sort.
-
-The renderer reads the public first-party [launch tiles](https://content.spacex.com/api/spacex-website/launches-page-tiles) and [future mission timings](https://content.spacex.com/cms-assets/future_missions.json). Completed launches match the website rule: final status with no matching non-null future timing record. These undocumented website endpoints may change; failures show a retry action rather than substituting another provider.
-
-Only one normalized table snapshot is cached in localStorage under `ebb:spacex:missions:v1`. It expires exactly 12 hours after a successful fetch. Opening the page, switching cards, sorting, searching, and reading the cache never extend that deadline. A valid cache avoids network requests; an expired or invalid cache requires a new fetch on page entry. There is no timed background refresh. **Refresh** bypasses the cache and replaces it only after both responses pass validation. Failed refreshes retain the existing displayed data and original timestamp; expired cached data is never loaded as a fallback. Storage failures do not prevent displaying newly fetched data. No launch history or complete API payload is stored. Existing active or paused removal tasks also lock the SpaceX navigation card.
-
 ## Development baseline
 
 - Node.js 22 LTS (npm is included with Node.js). `package.json` and `.nvmrc` record this baseline.

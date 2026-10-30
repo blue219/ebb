@@ -117,7 +117,7 @@ describe('Douyin workspace user flows', () => {
       account: signedInAccount,
       login: { state: 'idle' },
     })
-    window.ebb = { platform: 'win32', douyin: harness.bridge, tiktok: harness.bridge, spacex: { openMission: vi.fn().mockResolvedValue(undefined) } }
+    window.ebb = { platform: 'win32', douyin: harness.bridge, tiktok: harness.bridge }
     const user = userEvent.setup()
     render(<DouyinWorkspace />)
 
@@ -145,7 +145,7 @@ describe('Douyin workspace user flows', () => {
       account: signedInAccount,
       login: { state: 'idle' },
     })
-    window.ebb = { platform: 'win32', douyin: harness.bridge, tiktok: harness.bridge, spacex: { openMission: vi.fn().mockResolvedValue(undefined) } }
+    window.ebb = { platform: 'win32', douyin: harness.bridge, tiktok: harness.bridge }
     const user = userEvent.setup()
     render(<DouyinWorkspace />)
 
@@ -166,10 +166,9 @@ describe('Douyin workspace user flows', () => {
       account: signedInAccount,
       login: { state: 'idle' },
     })
-    window.ebb = { platform: 'win32', douyin: harness.bridge, tiktok: harness.bridge, spacex: { openMission: vi.fn().mockResolvedValue(undefined) } }
+    window.ebb = { platform: 'win32', douyin: harness.bridge, tiktok: harness.bridge }
     render(<DouyinWorkspace />)
     expect(await screen.findByRole('button', { name: 'Following accounts' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'SpaceX' })).toBeDisabled()
   })
 
   test('shows a QR code and scans once after sign-in succeeds', async () => {
@@ -179,7 +178,7 @@ describe('Douyin workspace user flows', () => {
       login: { state: 'ready', qrCode: 'data:image/png;base64,aA==' },
     }
     const harness = createBridge(state)
-    window.ebb = { platform: 'win32', douyin: harness.bridge, tiktok: harness.bridge, spacex: { openMission: vi.fn().mockResolvedValue(undefined) } }
+    window.ebb = { platform: 'win32', douyin: harness.bridge, tiktok: harness.bridge }
 
     render(<DouyinWorkspace />)
     expect(await screen.findByRole('dialog', { name: 'Sign in to Douyin' })).toBeInTheDocument()
@@ -204,7 +203,7 @@ describe('Douyin workspace user flows', () => {
     const initialState = new Promise<DouyinStateSnapshot>((resolve) => { resolveInitialState = resolve })
     const harness = createBridge(staleState)
     harness.bridge.getState = vi.fn(() => initialState)
-    window.ebb = { platform: 'win32', douyin: harness.bridge, tiktok: harness.bridge, spacex: { openMission: vi.fn().mockResolvedValue(undefined) } }
+    window.ebb = { platform: 'win32', douyin: harness.bridge, tiktok: harness.bridge }
 
     render(<DouyinWorkspace />)
     harness.emitAccount(signedInAccount)
@@ -222,7 +221,7 @@ describe('Douyin workspace user flows', () => {
       account: { state: 'signedOut' },
       login: { state: 'ready', qrCode: 'data:image/png;base64,aA==' },
     })
-    window.ebb = { platform: 'win32', douyin: harness.bridge, tiktok: harness.bridge, spacex: { openMission: vi.fn().mockResolvedValue(undefined) } }
+    window.ebb = { platform: 'win32', douyin: harness.bridge, tiktok: harness.bridge }
     render(<DouyinWorkspace />)
 
     expect(await screen.findByRole('button', { name: 'Sign in with QR code' })).toHaveTextContent('')
@@ -232,7 +231,7 @@ describe('Douyin workspace user flows', () => {
   test('freezes the visible manual selection before confirmation', async () => {
     localStorage.setItem('ebb:saved-douyin-session', 'true')
     const harness = createBridge({ task: readyTask(), account: signedInAccount, login: { state: 'idle' } })
-    window.ebb = { platform: 'win32', douyin: harness.bridge, tiktok: harness.bridge, spacex: { openMission: vi.fn().mockResolvedValue(undefined) } }
+    window.ebb = { platform: 'win32', douyin: harness.bridge, tiktok: harness.bridge }
     const user = userEvent.setup()
     render(<DouyinWorkspace />)
     await screen.findByRole('checkbox', { name: 'First video' })
@@ -251,7 +250,7 @@ describe('Douyin workspace user flows', () => {
   test('clamps a numeric scope and passes the frozen limit to the task module', async () => {
     localStorage.setItem('ebb:saved-douyin-session', 'true')
     const harness = createBridge({ task: readyTask(), account: signedInAccount, login: { state: 'idle' } })
-    window.ebb = { platform: 'win32', douyin: harness.bridge, tiktok: harness.bridge, spacex: { openMission: vi.fn().mockResolvedValue(undefined) } }
+    window.ebb = { platform: 'win32', douyin: harness.bridge, tiktok: harness.bridge }
     const user = userEvent.setup()
     render(<DouyinWorkspace />)
     const scope = await screen.findByRole('textbox', { name: 'Number of likes to clear' })
@@ -273,7 +272,7 @@ describe('Douyin workspace user flows', () => {
       progress: { completed: 1, total: 3 },
     })
     const harness = createBridge({ task: running, account: signedInAccount, login: { state: 'idle' } })
-    window.ebb = { platform: 'win32', douyin: harness.bridge, tiktok: harness.bridge, spacex: { openMission: vi.fn().mockResolvedValue(undefined) } }
+    window.ebb = { platform: 'win32', douyin: harness.bridge, tiktok: harness.bridge }
     const user = userEvent.setup()
     render(<DouyinWorkspace />)
 
@@ -301,7 +300,7 @@ describe('Douyin workspace user flows', () => {
       isRefreshingCompletedList: true,
     })
     const harness = createBridge({ task: completed, account: signedInAccount, login: { state: 'idle' } })
-    window.ebb = { platform: 'win32', douyin: harness.bridge, tiktok: harness.bridge, spacex: { openMission: vi.fn().mockResolvedValue(undefined) } }
+    window.ebb = { platform: 'win32', douyin: harness.bridge, tiktok: harness.bridge }
     const user = userEvent.setup()
     render(<DouyinWorkspace />)
 
@@ -320,7 +319,7 @@ describe('Douyin workspace user flows', () => {
     const running = readyTask({ state: 'running', mode: 'all', progress: { completed: 0, total: 2 } })
     const harness = createBridge({ task: running, account: signedInAccount, login: { state: 'idle' } })
     vi.mocked(harness.bridge.pause).mockRejectedValueOnce(new Error('Request rejected'))
-    window.ebb = { platform: 'win32', douyin: harness.bridge, tiktok: harness.bridge, spacex: { openMission: vi.fn().mockResolvedValue(undefined) } }
+    window.ebb = { platform: 'win32', douyin: harness.bridge, tiktok: harness.bridge }
     const user = userEvent.setup()
     render(<DouyinWorkspace />)
 
@@ -339,7 +338,7 @@ describe('Douyin workspace user flows', () => {
     const pendingLoad = new Promise<void>((resolve) => { finishLoad = resolve })
     const harness = createBridge({ task: readyTask({ hasMore: true }), account: signedInAccount, login: { state: 'idle' } })
     vi.mocked(harness.bridge.loadMore).mockReturnValue(pendingLoad)
-    window.ebb = { platform: 'win32', douyin: harness.bridge, tiktok: harness.bridge, spacex: { openMission: vi.fn().mockResolvedValue(undefined) } }
+    window.ebb = { platform: 'win32', douyin: harness.bridge, tiktok: harness.bridge }
     render(<DouyinWorkspace />)
 
     await screen.findByRole('checkbox', { name: 'First video' })
@@ -361,7 +360,7 @@ describe('Douyin workspace user flows', () => {
       account: signedInAccount,
       login: { state: 'idle' },
     })
-    window.ebb = { platform: 'win32', douyin: harness.bridge, tiktok: harness.bridge, spacex: { openMission: vi.fn().mockResolvedValue(undefined) } }
+    window.ebb = { platform: 'win32', douyin: harness.bridge, tiktok: harness.bridge }
     const user = userEvent.setup()
     render(<DouyinWorkspace />)
 
@@ -386,12 +385,11 @@ describe('Douyin workspace user flows', () => {
       account: signedInAccount,
       login: { state: 'idle' },
     })
-    window.ebb = { platform: 'win32', douyin: harness.bridge, tiktok: harness.bridge, spacex: { openMission: vi.fn().mockResolvedValue(undefined) } }
+    window.ebb = { platform: 'win32', douyin: harness.bridge, tiktok: harness.bridge }
     render(<DouyinWorkspace />)
 
     expect(await screen.findByRole('button', { name: 'Following accounts' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Collected videos' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'SpaceX' })).toBeDisabled()
   })
 
   test('renders TikTok through the shared workspace and keeps unknown totals explicit', async () => {
@@ -401,7 +399,7 @@ describe('Douyin workspace user flows', () => {
       account: { state: 'signedIn', name: 'TikTok account' },
       login: { state: 'idle' },
     })
-    window.ebb = { platform: 'win32', douyin: harness.bridge, tiktok: harness.bridge, spacex: { openMission: vi.fn().mockResolvedValue(undefined) } }
+    window.ebb = { platform: 'win32', douyin: harness.bridge, tiktok: harness.bridge }
     const user = userEvent.setup()
 
     render(<DouyinWorkspace platform="tiktok" />)
@@ -415,16 +413,13 @@ describe('Douyin workspace user flows', () => {
   test('delegates platform selection while no task holds the global lock', async () => {
     localStorage.setItem('ebb:saved-douyin-session', 'true')
     const harness = createBridge({ task: readyTask(), account: signedInAccount, login: { state: 'idle' } })
-    window.ebb = { platform: 'win32', douyin: harness.bridge, tiktok: harness.bridge, spacex: { openMission: vi.fn().mockResolvedValue(undefined) } }
+    window.ebb = { platform: 'win32', douyin: harness.bridge, tiktok: harness.bridge }
     const selectPlatform = vi.fn()
-    const openSpaceX = vi.fn()
     const user = userEvent.setup()
-    render(<DouyinWorkspace onSelectPlatform={selectPlatform} onOpenSpaceX={openSpaceX} />)
+    render(<DouyinWorkspace onSelectPlatform={selectPlatform} />)
 
     await user.click(await screen.findByRole('button', { name: /^TikTok/ }))
 
     expect(selectPlatform).toHaveBeenCalledWith('tiktok')
-    await user.click(screen.getByRole('button', { name: 'SpaceX' }))
-    expect(openSpaceX).toHaveBeenCalledOnce()
   })
 })
