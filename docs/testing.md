@@ -37,6 +37,12 @@ The Electron fixture uses `test-results/` for failure screenshots and traces. It
 
 Shared-platform tests additionally cover unknown totals, platform-namespaced bridges, independent account state, and the application-wide mutation lock. TikTok adapter tests use sanitized API responses and synthetic DOM fixtures described in [tiktok-web-contract.md](tiktok-web-contract.md).
 
+## SpaceX analysis checks
+
+Run `npx vitest run tests/shared/spacex.test.ts tests/renderer/SpaceXWorkspace.test.tsx tests/renderer/DouyinWorkspace.test.tsx` for the focused regression suite, then `npm run test:typecheck`, `npm run lint`, and `npm run build`. The tests use synthetic public mission records and controlled clocks, covering completed-mission selection, field/date/path validation, stable sorting, combined filters, fixed cache expiry, failed refreshes, retry, cache corruption, storage write failure, detail requests, and locked navigation. They do not contact SpaceX or signed-in account partitions.
+
+For read-only live verification, open the SpaceX card, compare the newest rows with the official completed table, apply filters, toggle date sorting, and check a detail link. Re-enter within 12 hours and confirm the successful-fetch timestamp does not change. Test desktop and narrow layouts; do not start account cleanup as part of SpaceX verification.
+
 ## Real-account release check
 
 > This procedure removes one real like and Ebb cannot restore it. Choose a video you are willing to unlike. Never use **All** for release verification.

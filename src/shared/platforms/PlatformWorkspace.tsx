@@ -1,3 +1,4 @@
+import { AppNavigation } from '@/components/AppNavigation'
 import { useCallback, useEffect, useMemo, useRef, useState, type UIEvent, type WheelEvent } from 'react'
 
 import { Button } from '@/components/ui/button'
@@ -29,10 +30,11 @@ type PendingClear =
 
 export interface PlatformWorkspaceProps {
   onSelectPlatform?: (platform: PlatformId) => void
+  onOpenSpaceX?: () => void
   platform?: PlatformId
 }
 
-function PlatformWorkspace({ onSelectPlatform = () => {}, platform = 'douyin' }: PlatformWorkspaceProps) {
+function PlatformWorkspace({ onSelectPlatform = () => {}, onOpenSpaceX = () => {}, platform = 'douyin' }: PlatformWorkspaceProps) {
   const bridge = window.ebb[platform]
   const platformName = platform === 'douyin' ? 'Douyin' : 'TikTok'
   const sessionKey = sessionKeys[platform]
@@ -350,22 +352,10 @@ function PlatformWorkspace({ onSelectPlatform = () => {}, platform = 'douyin' }:
           <div className="mt-6 flex min-h-0 flex-1 flex-col gap-6">
             <section>
               <p className="mb-2 px-1 text-[11px] font-medium tracking-[0.08em] text-zinc-400 uppercase">{t.platforms}</p>
-              <div className="space-y-1.5">
-                {(['douyin', 'tiktok'] as const).map((candidate) => {
-                  const name = candidate === 'douyin' ? 'Douyin' : 'TikTok'
-                  const active = candidate === platform
-                  return <button key={candidate} type="button" aria-label={name} aria-pressed={active} disabled={isWorkspaceSwitchLocked} onClick={() => onSelectPlatform(candidate)} className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm transition-colors ${active ? 'border border-blue-200/80 bg-blue-50/75 text-blue-700' : 'text-zinc-600 hover:bg-white/70'}`}>
-                    <span className={`grid size-7 place-items-center rounded-lg text-[10px] font-bold ${active ? 'bg-zinc-950 text-white' : 'bg-zinc-100 text-zinc-500'}`}>{name.slice(0, 1)}</span>
-                    <span className="min-w-0 flex-1 font-medium">{name}</span>
-                    {active && isSignedIn && <span className="flex items-center gap-1 text-[10px] font-medium"><span className="size-1.5 rounded-full bg-blue-500" />{t.connected}</span>}
-                  </button>
-                })}
-                <div aria-disabled="true" className="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm text-zinc-400">
-                  <span className="grid size-7 place-items-center rounded-lg bg-zinc-100 text-[10px] font-bold text-zinc-400">Y</span>
-                  <span className="min-w-0 flex-1 font-medium">YouTube</span>
-                  <span className="text-[10px]">{t.comingSoon}</span>
-                </div>
-              </div>
+              <AppNavigation current={platform} disabled={isWorkspaceSwitchLocked} comingSoon={t.comingSoon} connectedLabel={isSignedIn ? t.connected : undefined} onSelect={(page) => {
+                if (page === 'spacex') onOpenSpaceX()
+                else onSelectPlatform(page)
+              }} />
             </section>
           </div>
 
